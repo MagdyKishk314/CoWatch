@@ -1,4 +1,4 @@
-import type { Id } from './common';
+import type { Id, IsoDateTime } from './common';
 import type { PublicUser } from './user';
 
 /** Identity providers a user can authenticate with (canon §8). */
@@ -56,4 +56,18 @@ export interface AuthTokens {
 export interface AuthResult {
   user: PublicUser;
   tokens: AuthTokens;
+}
+
+/** A redacted view of one device session, for the session-management UI. */
+export interface SessionSummary {
+  id: Id;
+  /** True if this is the session the requesting access token belongs to. */
+  current: boolean;
+  platform: DevicePlatform;
+  label: string | null;
+  lastSeenAt: IsoDateTime;
+  createdAt: IsoDateTime;
+  expiresAt: IsoDateTime;
+  /** True if revoked or expired (i.e. no longer usable). */
+  revoked: boolean;
 }

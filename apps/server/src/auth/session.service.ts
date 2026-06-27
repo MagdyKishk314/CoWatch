@@ -1,11 +1,13 @@
 import {
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { DevicePlatform } from '@cowatch/types';
+import type { Session } from '@cowatch/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from './token.service';
 import type { Env } from '../config/env.validation';
@@ -187,5 +189,48 @@ export class SessionService {
     return (
       s !== null && s.revokedAt === null && s.expiresAt.getTime() > Date.now()
     );
+  }
+
+  /** All of a user's device sessions (active and revoked), newest activity first. */
+  async listForUser(userId: string): Promise<Session[]> {
+    const list = await this.prisma.session.findMany({ where: { userId } });
+    return [...list].sort(
+      (a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime(),
+    );
+  }
+
+  /** Revokes one session, but only if it belongs to `userId`. */
+  async revokeOwned(userId: string, sessionId: string): Promise<void> {
+    const s = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+    });
+    if (s === null || s.userId !== userId) {
+      throw new NotFoundException({
+        code: 'SESSION_NOT_FOUND',
+        message: 'Session not found.',
+      });
+    }
+    if (s.revokedAt === null) {
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { revokedAt: new Date() },
+      });
+    }
+  }
+
+  /** Revokes every other active session for the user, keeping `keepSessionId`. */
+  async revokeOthers(userId: string, keepSessionId: string): Promise<number> {
+    const list = await this.prisma.session.findMany({ where: { userId } });
+    let count = 0;
+    for (const s of list) {
+      if (s.id !== keepSessionId && s.revokedAt === null) {
+        await this.prisma.session.update({
+          where: { id: s.id },
+          data: { revokedAt: new Date() },
+        });
+        count += 1;
+      }
+    }
+    return count;
   }
 }

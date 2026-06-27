@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { DevicePlatform } from '@cowatch/types';
 import { SessionService } from './session.service';
 import { makeConfig, makeTokenService } from '../../test/test-utils';
@@ -90,5 +90,38 @@ describe('SessionService', () => {
     expect(count).toBe(2);
     expect(await sessions.isActive(a.sessionId)).toBe(false);
     expect(await sessions.isActive(b.sessionId)).toBe(false);
+  });
+
+  it('lists a user’s sessions', async () => {
+    const { sessions, prisma } = setup();
+    const user = await seedUser(prisma);
+    await sessions.create(user.id, { platform: DevicePlatform.Web });
+    await sessions.create(user.id, { platform: DevicePlatform.Desktop });
+    const list = await sessions.listForUser(user.id);
+    expect(list).toHaveLength(2);
+  });
+
+  it('revokeOwned rejects a session owned by another user', async () => {
+    const { sessions, prisma } = setup();
+    const u1 = await seedUser(prisma);
+    const u2 = await seedUser(prisma);
+    const s1 = await sessions.create(u1.id, { platform: DevicePlatform.Web });
+    await expect(
+      sessions.revokeOwned(u2.id, s1.sessionId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(await sessions.isActive(s1.sessionId)).toBe(true);
+  });
+
+  it('revokeOthers keeps the current session and revokes the rest', async () => {
+    const { sessions, prisma } = setup();
+    const u = await seedUser(prisma);
+    const keep = await sessions.create(u.id, { platform: DevicePlatform.Web });
+    const other = await sessions.create(u.id, {
+      platform: DevicePlatform.Desktop,
+    });
+    const count = await sessions.revokeOthers(u.id, keep.sessionId);
+    expect(count).toBe(1);
+    expect(await sessions.isActive(keep.sessionId)).toBe(true);
+    expect(await sessions.isActive(other.sessionId)).toBe(false);
   });
 });

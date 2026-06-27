@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  Param,
   Post,
   Req,
   Res,
@@ -11,7 +13,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
-import { DevicePlatform, type AuthResult, type SelfUser } from '@cowatch/types';
+import {
+  DevicePlatform,
+  type AuthResult,
+  type SelfUser,
+  type SessionSummary,
+} from '@cowatch/types';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -96,6 +103,59 @@ export class AuthController {
       });
     }
     return self;
+  }
+
+  @Post('guest')
+  async guest(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthResult> {
+    const result = await this.auth.createGuest(this.device(req));
+    this.setRefreshCookie(res, result.tokens.refreshToken);
+    return result;
+  }
+
+  @Post('upgrade')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async upgrade(
+    @CurrentUser() ctx: AuthContext,
+    @Body() dto: RegisterDto,
+  ): Promise<SelfUser> {
+    return this.auth.upgradeGuest(ctx.userId, dto);
+  }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  async sessions(@CurrentUser() ctx: AuthContext): Promise<SessionSummary[]> {
+    return this.auth.listSessions(ctx.userId, ctx.sessionId);
+  }
+
+  @Delete('sessions/:id')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard)
+  async revokeSession(
+    @CurrentUser() ctx: AuthContext,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.auth.revokeSession(ctx.userId, id);
+    if (id === ctx.sessionId) {
+      res.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    }
+  }
+
+  @Post('sessions/revoke-others')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async revokeOtherSessions(
+    @CurrentUser() ctx: AuthContext,
+  ): Promise<{ revoked: number }> {
+    const revoked = await this.auth.revokeOtherSessions(
+      ctx.userId,
+      ctx.sessionId,
+    );
+    return { revoked };
   }
 
   private device(req: Request): DeviceInput {

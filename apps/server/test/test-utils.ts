@@ -15,6 +15,7 @@ export function makeConfig(overrides: Partial<Env> = {}): ConfigService<Env, tru
     AUTH_ACCESS_TTL: 900,
     AUTH_REFRESH_TTL: 60 * 60 * 24 * 30,
     AUTH_REFRESH_REUSE_GRACE: 10,
+    AUTH_GUEST_TTL: 60 * 60 * 24,
     AUTH_ISSUER: 'cowatch',
     COOKIE_DOMAIN: undefined,
     COOKIE_SECURE: false,

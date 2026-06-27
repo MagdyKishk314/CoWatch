@@ -53,6 +53,15 @@ export function createInMemoryPrisma(): PrismaService & { _reset: () => void } {
       users.push(rec);
       return rec;
     },
+    update: async ({ where, data }: { where: Rec; data: Rec }) => {
+      const u = users.find((x) => x.id === where.id);
+      if (u === undefined) throw new Error('User not found');
+      for (const [k, v] of Object.entries(data)) {
+        u[k] = v !== null && typeof v === 'object' && 'set' in v ? v.set : v;
+      }
+      u.updatedAt = new Date();
+      return u;
+    },
   };
 
   const session = {
@@ -85,6 +94,10 @@ export function createInMemoryPrisma(): PrismaService & { _reset: () => void } {
       }
       return s;
     },
+    findMany: async ({ where }: { where?: Rec } = {}) =>
+      sessions.filter((s) =>
+        where?.userId === undefined ? true : s.userId === where.userId,
+      ),
     update: async ({ where, data }: { where: Rec; data: Rec }) => {
       const s = sessions.find((x) => x.id === where.id);
       if (s === undefined) throw new Error('Session not found');

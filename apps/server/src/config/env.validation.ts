@@ -24,6 +24,8 @@ export const envSchema = z.object({
   AUTH_REFRESH_TTL: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
   /** Grace window (seconds) where a just-rotated refresh token is still accepted. */
   AUTH_REFRESH_REUSE_GRACE: z.coerce.number().int().nonnegative().default(10),
+  /** Guest-account absolute lifetime in seconds (default 24h). */
+  AUTH_GUEST_TTL: z.coerce.number().int().positive().default(60 * 60 * 24),
   AUTH_ISSUER: z.string().min(1).default('cowatch'),
 
   // --- Cookies ---
