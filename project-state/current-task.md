@@ -1,7 +1,7 @@
 # Project State — Current Task
 
 > What the team is actively doing right now.
-> **Status:** Phase 1 (Authentication) — **Slice 1 (core email/password + sessions) implemented and green.**
+> **Status:** Phase 1 (Authentication) — **Slices 1 + 2a done** (core email/password auth + device sessions + guest accounts + session management). Next: Slice 2b — see [next-task.md](./next-task.md).
 > **Owner agent:** Backend Engineer (lead)
 > Last updated: 2026-06-27
 

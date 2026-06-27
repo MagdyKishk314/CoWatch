@@ -9,6 +9,17 @@
 
 ---
 
+## Phase 1 — Authentication — Slice 2a (guest accounts + session management) — 2026-06-27
+
+Builds on Slice 1. **build 3/3, typecheck, test 29/29** (in-memory Prisma double).
+
+- [x] Guest accounts: `POST /auth/guest` (ephemeral, `guestExpiresAt = now + AUTH_GUEST_TTL`) and `POST /auth/upgrade` (guarded; in-place guest→registered, keeps id+sessions; rejects non-guests / taken email+username).
+- [x] Session management: `GET /auth/sessions`, `DELETE /auth/sessions/:id` (owned-only, 404 otherwise), `POST /auth/sessions/revoke-others`.
+- [x] `SessionService.listForUser/revokeOwned/revokeOthers`; `SessionSummary` type; `AUTH_GUEST_TTL` config.
+- [ ] Deferred to Slice 2b/2c: email verification, password reset, TOTP 2FA, real ESLint, Google OAuth, real-Mongo integration.
+
+---
+
 ## Phase 1 — Authentication — Slice 1 (core email/password + sessions) — 2026-06-27
 
 First implementation code (R1 approval gate cleared). Monorepo toolchain + core auth vertical; **build / lint / typecheck / test all green (21 tests)**.
