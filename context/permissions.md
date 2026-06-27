@@ -6,6 +6,8 @@
 **Owner agent:** Documentation Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Added the first-class `playlistAuthority` room-config field and the `chatLock=on` suppresses-both-Guest-and-Member ruling per Chief Architect resolutions (B6/PERM OQ-5, PERM OQ-1).
+
 > This is a **condensed context file** for fast restore (R2). It summarizes and **points to** the full design. On any conflict the source wins, in this order: [Architecture Canon §6](./architecture.md#6-permission-model) → [PERMISSIONS.md](../docs/PERMISSIONS.md) → this digest.
 
 ---
@@ -31,13 +33,27 @@ Permissions are **room-scoped** and operate on the **`Membership`** (one User �
 
 ## Sync-authority modes (`SyncAuthority`)
 
-Per-room, separately configurable for **playback control** and **playlist control**:
+Per-room, separately configurable for **playback control** and **playlist control** via **two independent `SyncAuthority`-typed fields**:
+
+- `syncAuthority` — gates mutating `playback:*`.
+- `playlistAuthority` — first-class per-room field mirroring `SyncAuthority`; gates `room:playlist:*` for **Members** (Owner/Moderator always bypass). Members are **additionally** blocked when `playlistLock=on`. Configured **independently** of `syncAuthority`. *(Added 2026-06-27, B6 — resolves OQ-5. Canonical name `playlistAuthority`, replacing the prior `syncAuthorityPlaylist` working name.)*
+
+Each field takes one of:
 
 - `owner_only` — only the Owner may emit mutating events.
 - `owner_moderators` — Owner + Moderators.
 - `everyone` — any member.
 
 The server accepts mutating `playback:*` events **only** from members whose effective role satisfies the room's mode; all others receive `system:error` with code **`FORBIDDEN_SYNC`**. Guests' chat is gated by `chatLock`.
+
+## Chat lock (`chatLock`)
+
+`chatLock=on` suppresses chat for **both Guest and Member** (Discord lock semantics). **Owner and Moderator are exempt** and can still speak. Below-Moderator sends while locked are rejected with code **`CHAT_LOCKED`**. *(Added 2026-06-27 — resolves OQ-1.)*
+
+## Moderation & member-state (close-out of OQ-2/3/4)
+
+- **OQ-2 / OQ-4** → durable bans live in **`room_bans`** (outlive membership deletion); pending join approvals live in **`join_requests`** (TTL ≈ 10 min). See [Canon §3/§4](./architecture.md#4-data-modeling-conventions-mongodb--prisma).
+- **OQ-3** → member-state changes without join/leave (mute, timeout, role change) broadcast via the **`room:member:update`** (S→C) event. See [realtime.md](./realtime.md).
 
 ## Ownership transfer (on owner disconnect/leave)
 

@@ -6,6 +6,8 @@
 - **Owner agent:** Voice Engineer
 - **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved Open Questions §13 per Chief Architect rulings — cheap token re-mint, concurrent web+desktop voice (distinct `sessionId`, UI dedupes by `userId`), screen-audio off by default, capacity audio 25 / video 15; data-channel transport, recording/egress, autoscaling/multi-region, and E2EE deferred (recording + E2EE behind future ADRs).
+
 **Canon & cross-links**
 
 - [Architecture Canon](../context/architecture.md) — single source of truth ([§5 Realtime](../context/architecture.md#5-realtime-transport-abstraction-adr-004), [§6 Permissions](../context/architecture.md#6-permission-model), [§8 Auth](../context/architecture.md#8-auth--token-model-adr-008), [§10 Non-negotiables](../context/architecture.md#10-cross-cutting-non-negotiables))
@@ -582,6 +584,18 @@ Client flow:
 | 7 | Capacity ceilings per channel type (audio vs video) — exact numbers? | Start audio 25 / video 15; tune against SFU egress metrics post-launch. |
 | 8 | **LiveKit Cloud vs self-hosted SFU** for launch? | **Self-hosted in Docker** (canon ADR-010 Docker-first parity); keep the client `livekitUrl` config-driven so a managed/Cloud region can be swapped in later without client changes. |
 | 9 | **Insertable-streams E2EE** for password channels? | Defer. DTLS-SRTP to the SFU is the baseline (§11); end-to-end (SFU-blind) encryption adds key-management cost and breaks server-side recording — revisit only if a true-private use case demands it, behind a new ADR. |
+
+**Resolutions (2026-06-27)** — per Chief Architect rulings ([project-state/open-questions.md](../project-state/open-questions.md) §8):
+
+- Resolution (2026-06-27): Q1 data-channel transport — **Deferred to Phase 8+** (media and app-event planes stay separate; future ADR only if adopted).
+- Resolution (2026-06-27): Q2 token refresh — **Resolved**: cheap re-mint on reconnect (short ~10 min TTL); add LiveKit auto-refresh only if reconnect-storm metrics demand it.
+- Resolution (2026-06-27): Q3 recording / Egress — **Deferred to Phase 8+** behind a future ADR (consent + MinIO storage + legal review).
+- Resolution (2026-06-27): Q4 multi-region SFU + autoscaling — **Deferred to Phase 8+**; single-region cluster at launch (`livekitUrl` already region-ready).
+- Resolution (2026-06-27): Q5 concurrent web+desktop voice — **Resolved**: allow both (distinct `sessionId`; UI dedupes by `userId`), pending product confirm.
+- Resolution (2026-06-27): Q6 screen-share audio default — **Resolved**: off by default, opt-in per share.
+- Resolution (2026-06-27): Q7 capacity ceilings — **Resolved**: audio 25 / video 15 to start, tuned by SFU egress metrics.
+- Resolution (2026-06-27): Q8 Cloud vs self-hosted — **Resolved**: self-hosted SFU in Docker (ADR-010), `livekitUrl` config-swappable to managed/Cloud later.
+- Resolution (2026-06-27): Q9 insertable-streams E2EE — **Deferred to Post-MVP** behind a future ADR (DTLS-SRTP-to-SFU baseline).
 
 ---
 

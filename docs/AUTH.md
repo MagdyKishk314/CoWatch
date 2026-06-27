@@ -6,6 +6,8 @@
 **Owner agent:** Backend Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved Open Questions §21 (OQ-1…OQ-6) per Chief Architect rulings — denylist store config-selectable, refresh cookie `Path=/api/v1/auth`, raw IP 30 d then region, guest 24 h browser-bound; magic-link and WebAuthn/passkeys deferred to Post-MVP.
+
 > Canon compliance: this document implements [ADR-008 — Auth tokens](../adr/ADR-008-auth-tokens.md) and conforms to [Architecture Canon §8 Auth/Token Model](../context/architecture.md#8-auth--token-model-adr-008) and [§10 Cross-Cutting Non-Negotiables](../context/architecture.md#10-cross-cutting-non-negotiables). Security baseline is shared with [docs/SECURITY.md](./SECURITY.md). Type names, route shapes, and event names below match the canon verbatim.
 
 ---
@@ -892,12 +894,12 @@ Consistent with [docs/SECURITY.md](./SECURITY.md) and [Architecture Canon §10](
 
 | # | Question | Recommendation |
 |---|---|---|
-| OQ-1 | Session denylist backing store — Redis vs in-process map? | **Redis** (shared across server replicas; canon is Docker/VPS-first and will scale horizontally). In-process is acceptable only for single-node dev. |
-| OQ-2 | Refresh-cookie `Path` granularity — `/api/v1/auth` only, or also `/api/v1` for SSR? | Keep **`/api/v1/auth`** (tightest scope). Cowatch SPA refreshes explicitly, so no broader path is needed. |
-| OQ-3 | Magic-link / passwordless login as a future flow? | Out of scope for Phase 1; revisit post-launch. The `EmailToken` model already generalizes to it. |
-| OQ-4 | WebAuthn/passkeys as a stronger second factor than TOTP? | Phase-2 enhancement; design `AuthIdentity`/2FA tables to allow an additional `factor` type without migration churn. |
-| OQ-5 | How long to retain raw IP for security forensics before reducing to region? | Recommend **30 days** raw (security window) then coarsen to region; confirm with DevOps + privacy review in [docs/SECURITY.md](./SECURITY.md). |
-| OQ-6 | Guest session hard-expiry duration? | Recommend **24 h absolute** + browser-session bound; tune against abuse metrics. |
+| OQ-1 | Session denylist backing store — Redis vs in-process map? | **Redis** (shared across server replicas; canon is Docker/VPS-first and will scale horizontally). In-process is acceptable only for single-node dev. <br>**Resolution (2026-06-27):** Denylist store is **config-selectable** — `redis` for multi-node, in-process for single-node dev. — **Status: Resolved.** |
+| OQ-2 | Refresh-cookie `Path` granularity — `/api/v1/auth` only, or also `/api/v1` for SSR? | Keep **`/api/v1/auth`** (tightest scope). Cowatch SPA refreshes explicitly, so no broader path is needed. <br>**Resolution (2026-06-27):** Refresh cookie stays at **`Path=/api/v1/auth`** (tightest scope). — **Status: Resolved.** |
+| OQ-3 | Magic-link / passwordless login as a future flow? | Out of scope for Phase 1; revisit post-launch. The `EmailToken` model already generalizes to it. <br>**Resolution (2026-06-27):** Magic-link is out of Phase 1; the `EmailToken` model already generalizes to it. — **Status: Deferred to Post-MVP.** |
+| OQ-4 | WebAuthn/passkeys as a stronger second factor than TOTP? | Phase-2 enhancement; design `AuthIdentity`/2FA tables to allow an additional `factor` type without migration churn. <br>**Resolution (2026-06-27):** WebAuthn/passkeys are post-MVP; keep `AuthIdentity`/2FA tables extensible to add a `factor` type without migration churn. — **Status: Deferred to Post-MVP.** |
+| OQ-5 | How long to retain raw IP for security forensics before reducing to region? | Recommend **30 days** raw (security window) then coarsen to region; confirm with DevOps + privacy review in [docs/SECURITY.md](./SECURITY.md). <br>**Resolution (2026-06-27):** Retain raw IP **30 days** then coarsen to region. — **Status: Resolved.** |
+| OQ-6 | Guest session hard-expiry duration? | Recommend **24 h absolute** + browser-session bound; tune against abuse metrics. <br>**Resolution (2026-06-27):** Guest session = **24 h absolute + browser-session bound**. — **Status: Resolved.** |
 
 ---
 

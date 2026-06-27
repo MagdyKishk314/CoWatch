@@ -6,6 +6,8 @@
 **Owner agent:** Documentation Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Added the Redis realtime backplane (ADR-011) and the `room:member:update` (S→C) event to this digest per Chief Architect resolutions (B2/B5).
+
 > This is a **condensed context file** for fast restore (R2). It summarizes and **points to** the full design. On any conflict the source wins, in this order: [Architecture Canon §5](./architecture.md#5-realtime-transport-abstraction-adr-004) → [REALTIME.md](../docs/REALTIME.md) → this digest. The envelope shape, the `RealtimeTransport` interface, the backoff constants, the heartbeat cadence, and the event-name grammar are **copied from canon verbatim** and are not re-decided here.
 
 ---
@@ -19,10 +21,12 @@ A **replaceable realtime transport** ([ADR-004](../adr/)) lives in `packages/rea
 - **One envelope, both directions** — every frame is a `RealtimeEnvelope<T>` with `v: 1`, `id` (ULID), `type` (namespaced event), optional `room`, `ts`, optional `corr`, and typed `data` from `packages/types`.
 - **Three send modes** — `send()` (fire-and-forget), `request()` (ack-correlated via `corr`, with timeout), `subscribe()` (topic handler scoped by `room`).
 - **Event-name grammar** — `namespace:entity:action`, lowercase, colon-delimited. Canonical namespaces: `room`, `playback`, `chat`, `presence`, `social`, `notification`, `voice`, `system`.
+- **`room:member:update` (S→C only)** — member-state change **without** join/leave (mute, timeout, role change). Payload `{ roomId, userId, memberId, role?, moderationState?{ muted?, mutedUntil?, timeoutUntil? }, reason? }`. **No ack**, ordered per-topic by `meta.seq`, buffered in the resume ring. (Added 2026-06-27, B5; resolves PERMISSIONS OQ-3.)
 - **Reconnection is the transport's job** — exponential backoff **with jitter** (base **500 ms**, cap **15 s**), auto re-subscribe of all topics, and a **resume** handshake replaying missed events by `lastEnvelopeId` where the server buffer allows; otherwise the client requests a fresh `playback:sync` + room snapshot.
 - **Presence** is first-class on the interface: `setPresence()` / `onPresence()`, states `online | idle | dnd | offline` with optional `{ kind: 'room'; roomId }` activity.
 - **Lifecycle is observable** — `getState()` / `onStateChange()` over `connecting | open | reconnecting | closed`.
 - **Server stamps authority** — server validates mutating `playback:*`, applies, re-stamps `serverEpochMs`, and broadcasts.
+- **Backplane = Redis ([ADR-011](../adr/ADR-011-realtime-backplane.md))** — cross-instance fan-out via **Redis pub/sub** + a **Redis Streams** resume buffer (bounded **60 s / 500 envelopes per room**); Mongo change streams are secondary reconciliation only. Per-room single-writer playback authority via Redis lock **`playback:lock:{roomId}`** + monotonic `seq`. The backplane sits **below** ADR-004's transport abstraction — serverless adapters (Durable Objects, etc.) swap the bus without touching feature code. The resume handshake replays from this Streams ring; on overflow the client falls back to a fresh `playback:sync` + room snapshot.
 
 ## Heartbeat & sync coupling
 

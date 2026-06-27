@@ -1,9 +1,33 @@
 # Project State — Completed Work
 
 > Append-only log of completed deliverables, newest first.
-> **Status:** Phase 0 planning artifacts complete.
+> **Status:** Phase 0 planning artifacts complete; Phase-0 open-questions punch-list cleared.
 > **Owner agent:** Historian / PM
 > Last updated: 2026-06-27
+
+> Amended 2026-06-27: added the open-questions remediation deliverable (ADR backfills/ADR-011 + canon amendments).
+
+---
+
+## Phase 0 — Open-Questions Remediation — 2026-06-27
+
+Cleared the Phase-0 open-questions punch-list under the Chief Architect's binding resolutions
+([open-questions.md](./open-questions.md)). Planning only — no application code (R1). Recorded
+per R3/R4 in [history/decision-ledger.md](../history/decision-ledger.md) (2026-06-27 remediation
+section) and [history/migrations.md](../history/migrations.md).
+
+- [x] Backfilled [ADR-009 — MinIO object storage](../adr/ADR-009-minio-storage.md) and [ADR-010 — Docker-first delivery](../adr/ADR-010-docker-first.md) to ratify existing canon (no decision change) — B1.
+- [x] Authored [ADR-011 — Realtime backplane (Redis pub/sub + Streams)](../adr/ADR-011-realtime-backplane.md); ledger row **D-011** added — B2.
+- [x] Ledger canon-amendment rows for new collections `room_bans`, `join_requests`, `activity_events` (and confirmation of `role_assignments`, `votes`) — B3/B4.
+- [x] Ledger canon-amendment row for realtime event `room:member:update` (S→C) — B5.
+- [x] Ledger canon-amendment row for per-room field `playlistAuthority` (DB rename `syncAuthorityPlaylist` → `playlistAuthority`) — B6.
+- [x] Lesson [L-003](../history/lessons-learned.md) recorded on the parallel-authoring Open-Questions discipline.
+- [x] Process-discipline ADR renumbered to **ADR-012 / D-012** (Deferred-to-Phase-1) — PROC-1.
+- [x] Repomix regeneration noted as **deferred — pending first code** (PROC-3); not run.
+
+> Schema/index/model detail (Prisma models, indexes, TTLs) and canon §2/§3/§5/§6 edits are
+> authored by the Backend/Data and Canon agents; entries here track the history + project-state
+> deliverables this team owns.
 
 ---
 

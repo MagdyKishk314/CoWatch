@@ -1,8 +1,19 @@
 # Cowatch Architecture Canon
 
-Last updated: 2026-06-27
+Last updated: 2026-06-27 (Amended 2026-06-27 — see Amendments below)
 
 > **STATUS: CANON.** This document is the single source of truth for the Cowatch platform. Every downstream planning artifact (specs, tasks, tests, ADRs, docs) MUST comply with it. On any conflict, this document wins. Changes here require an ADR + history entry + context update + repomix update (R3/R4).
+
+> Amended 2026-06-27: Added ADR-011 (realtime backplane), `room_bans`/`join_requests`/`activity_events` collections, `room:member:update` event, and the `playlistAuthority` room-config field per Chief Architect resolutions (B2/B3/B5/B6).
+
+## Amendments (2026-06-27)
+
+Per the Chief Architect's binding resolutions (see `project-state/open-questions.md`), the following additive changes were applied to this canon. These do **not** re-decide anything below; they record the resolutions in canon.
+
+- **§2 Decisions** — Added **ADR-011** (Realtime backplane: Redis pub/sub fan-out + Redis Streams resume buffer, Mongo change streams as secondary reconciliation; sits below ADR-004's transport abstraction). Ledger row **D-011** (B2/ARCH OQ-1/RT OQ-1/DEPLOY OQ-1).
+- **§3 / §4 Collections** — Added three collections to the inventory and data-model conventions: **`room_bans`** (durable bans that outlive membership deletion; unique `(roomId,userId)` + optional `expiresAt` TTL), **`join_requests`** (pending join-approval queue; partial-unique `(roomId,userId)` where `status=pending` + ~10 min `expiresAt` TTL), **`activity_events`** (append-only social feed, distinct from notifications; `(userId,createdAt)` index, 180 d TTL). Also confirmed **`role_assignments`** and **`votes`** are part of the canonical inventory (B3/B4; PERM OQ-2/OQ-4).
+- **§3 Events** — Added **`room:member:update`** (server→client, no ack, ordered per-topic by `meta.seq`, buffered in the resume ring) for member-state changes without join/leave (mute, timeout, role change). Ratified `room:playlist:*` (queue mutations live in the `room` namespace, not a top-level `playlist` namespace) and the additive `room:member:kick|ban|mute|role` C→S intents (B5; PERM OQ-3; EVENTS OQ-1/OQ-2).
+- **§6 Permission Model** — Added **`playlistAuthority`** as a first-class `SyncAuthority`-typed per-room field, configured independently of playback `syncAuthority`; gates `room:playlist:*` for Members (Owner/Mod bypass; Members also blocked when `playlistLock=on`). Clarified **`chatLock=on` suppresses both Guest and Member** chat (Owner/Moderator exempt; below-Mod sends rejected with `CHAT_LOCKED`) (B6/PERM OQ-5; PERM OQ-1).
 
 ---
 
@@ -42,6 +53,7 @@ Last updated: 2026-06-27
 - **ADR-008** — **JWT access tokens + rotating refresh tokens**, httpOnly refresh cookie, device sessions, TOTP 2FA. *Rationale: short-lived access + revocable rotating refresh.*
 - **ADR-009** — **MinIO** S3-compatible object storage (avatars, room assets, uploads, thumbnails, caches). *Rationale: self-hostable, S3 API portability.*
 - **ADR-010** — **Docker-first** delivery; every service runs in Docker across local / VPS / Vercel / production. *Rationale: reproducible parity from dev to prod.*
+- **ADR-011** — **Realtime backplane: Redis pub/sub (cross-instance fan-out) + Redis Streams (resume buffer), Mongo change streams as secondary reconciliation.** Sits *below* ADR-004's transport abstraction; serverless adapters (Durable Objects, etc.) swap the bus without touching feature code. Per-room single-writer playback authority via Redis lock `playback:lock:{roomId}` + monotonic `seq`. *Rationale: load-bearing multi-instance dependency; promoted from an ADR-004 implementation detail to its own ratified decision (D-011).*
 
 > Every ADR file lives at `adr/ADR-NNN-kebab-title.md`. No architecture change ships without one (R3).
 
@@ -61,12 +73,15 @@ Last updated: 2026-06-27
 
 **Realtime event names** — `namespace:entity:action`, lowercase, colon-delimited. Canonical namespaces: `room`, `playback`, `chat`, `presence`, `social`, `notification`, `voice`, `system`. Examples:
 - `playback:play`, `playback:pause`, `playback:seek`, `playback:rate`, `playback:sync` (server heartbeat)
-- `room:member:join`, `room:member:leave`, `room:ownership:transfer`, `room:settings:update`
+- `room:member:join`, `room:member:leave`, `room:member:update`, `room:ownership:transfer`, `room:settings:update`
+- `room:member:update` (S→C only, no ack, ordered per-topic by `meta.seq`, buffered in the resume ring) — member-state change **without** join/leave (mute, timeout, role change). Payload `{ roomId, userId, memberId, role?, moderationState?{ muted?, mutedUntil?, timeoutUntil? }, reason? }`.
+- `room:playlist:add`, `room:playlist:reorder`, `room:playlist:remove` — queue mutations live in the **`room`** namespace (entity segment `playlist`), **not** a top-level `playlist` namespace; REST stays `/rooms/:roomId/playlist/items`.
+- `room:member:kick`, `room:member:ban`, `room:member:mute`, `room:member:role` — additive **C→S** moderation intents; the authoritative truth broadcast back is `room:member:leave` / `room:member:update`.
 - `chat:message:new`, `chat:message:edit`, `chat:message:delete`, `chat:typing`, `chat:reaction:add`
 - `presence:update`, `social:friend:request`, `social:friend:accept`, `notification:new`
 - `voice:channel:join`, `voice:channel:leave`, `system:error`, `system:ack`
 
-**MongoDB collections** — `snake_case`, plural: `users`, `sessions`, `rooms`, `memberships`, `playlists`, `queue_items`, `messages`, `dm_threads`, `notifications`, `voice_channels`, `friendships`, `friend_requests`, `blocks`, `invite_links`. (Prisma `@@map` enforces this.)
+**MongoDB collections** — `snake_case`, plural: `users`, `sessions`, `rooms`, `memberships`, `playlists`, `queue_items`, `messages`, `dm_threads`, `notifications`, `voice_channels`, `friendships`, `friend_requests`, `blocks`, `invite_links`, `room_bans`, `join_requests`, `activity_events`, `role_assignments`, `votes`. (Prisma `@@map` enforces this.)
 
 **TypeScript type names** — `PascalCase` for types/interfaces/enums (no `I` prefix); entity interfaces match domain term (`User`, `Room`, `QueueItem`). DTO suffix `Dto` (`CreateRoomDto`). Realtime payloads suffix `Event`/`Payload` (`PlaybackSyncEvent`). Enums `PascalCase` singular with `PascalCase` members (`RoomRole.Owner`). Shared cross-app types live in `packages/types`; never duplicated.
 
@@ -82,6 +97,12 @@ Last updated: 2026-06-27
 - **Denormalization policy** (MongoDB-native, per SPEC): duplicate small, read-hot, slowly-changing fields to avoid join fan-out. Canonical denorm snapshots: `Membership.userDisplayName/userAvatarUrl`, `Room.ownerId/ownerDisplayName`, `Message.authorDisplayName/authorAvatarUrl`, `QueueItem.addedByDisplayName`, `Room.currentVideoTitle` + `Room.viewerCount` for discovery. Denormalized fields are **eventually consistent**; the owning aggregate is the source of truth and re-fans updates via realtime + background reconciliation. Every denormalized field is documented at its definition with its source.
 - **Standard indexing pattern**: index every foreign key used in a query filter; compound index ordered by equality→sort→range. Mandatory indexes: `memberships (roomId, userId)` unique, `messages (roomId, createdAt)`, `notifications (userId, readAt, createdAt)`, `sessions (userId)`, `friendships (userIdA, userIdB)` unique, `rooms (visibility, isActive)` for discovery, text-eligible fields use a separate search index. Soft-delete via `deletedAt: DateTime?`; queries filter it.
 - **Timestamps**: every collection has `createdAt DateTime @default(now())` and `updatedAt DateTime @updatedAt`.
+- **Moderation & social-feed collections** (added 2026-06-27, B3/B4 — data-model change, no ADR):
+  - `room_bans` — durable bans that **outlive membership deletion**. Unique `(roomId, userId)`; optional `expiresAt DateTime?` with a TTL index for temp-bans (permanent bans omit `expiresAt`).
+  - `join_requests` — pending join-approval queue. **Partial-unique** `(roomId, userId)` where `status = pending` (one open request per user/room) + `expiresAt` TTL ≈ **10 min**; partial uniqueness is created out-of-band (Prisma can't express it declaratively).
+  - `activity_events` — append-only social feed, **distinct from `notifications`**. Index `(userId, createdAt)`; **180-day** `expiresAt`/`createdAt` TTL.
+  - `role_assignments` — immutable role-change audit. Indexes `(roomId, createdAt)` + `(membershipId, createdAt)`; **durable, no TTL**, append-only.
+  - `votes` — individual queue-item votes. Unique `(queueItemId, userId, kind)` + index `(queueItemId, kind)`.
 - Prisma schema is the single owner of the data model, living in `packages/database/prisma/schema.prisma`; the generated client is re-exported through `packages/database`.
 
 ---
@@ -159,6 +180,12 @@ export interface RealtimeTransport {
 | send chat | ✓ | ✓ | ✓ | ◐ |
 
 ◐ = gated by room config. **Sync-authority modes** (`SyncAuthority`): `owner_only` \| `owner_moderators` \| `everyone` — these decide who holds the ◐ on **playback control** and (separately configurable) **playlist control**. Guests' chat is gated by `chatLock`.
+
+**Per-room authority fields** (each `SyncAuthority`-typed, configured **independently**):
+- `syncAuthority` — gates mutating `playback:*` (who may control playback).
+- `playlistAuthority` — first-class per-room field mirroring `SyncAuthority` (`owner_only` \| `owner_moderators` \| `everyone`); gates `room:playlist:*` for **Members** (Owner/Moderator always bypass). Members are **additionally** blocked when `playlistLock=on`. Independent of `syncAuthority`. *(Added 2026-06-27, B6 — resolves PERMISSIONS OQ-5. Canonical name = `playlistAuthority`; replaces the prior `syncAuthorityPlaylist` working name.)*
+
+**Chat lock semantics** (`chatLock`, 2026-06-27, PERM OQ-1): `chatLock=on` suppresses chat for **both Guest and Member** (Discord lock semantics). **Owner/Moderator are exempt** and can still speak. Below-Moderator sends while locked are rejected with code `CHAT_LOCKED`.
 
 **Sync-authority modes** (per-room, per-SPEC): `owner_only`, `owner_moderators`, `everyone`. Mutating playback events are accepted by the server only from members whose effective role satisfies the room's mode; all others receive `system:error` with code `FORBIDDEN_SYNC`.
 

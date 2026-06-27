@@ -461,6 +461,16 @@ These are the testable conditions for Phase 3 sign-off (coverage target 90%, can
 | 4 | YouTube IFrame `getCurrentTime()` granularity (~250 ms) vs. a 500 ms deadband. | Acceptable: the deadband (500 ms) is ~2× the API jitter. If real-world data shows boundary oscillation, raise the soft-band hysteresis floor (§4.3) from 200 ms. Validate in Phase 3 QA. |
 | 5 | Clock re-handshake cadence (30 s) for high-churn mobile. | Tentatively 30 s + on `visibilitychange`. Tune with telemetry on offset variance; expose as a transport config constant, not hard-coded in `PlaybackModule`. |
 
+> Amended 2026-06-27: Open Questions §12 resolved per Chief Architect rulings (adopting each item's recommendation; see [project-state/open-questions.md](../project-state/open-questions.md)).
+
+**Resolutions (2026-06-27):**
+
+- Resolution (2026-06-27): Q1 `pauseOnAnyBuffer` — **Deferred to Post-MVP**: spec the payload now, gate behind a room setting later (default clock-keeps-moving ships in Phase 3).
+- Resolution (2026-06-27): Q2 heartbeat cost at scale — **Resolved** (default fixed; tuned Phase 11): keep the 2 s heartbeat; evaluate suppressing heartbeats while `isPlaying === false` and coalescing per-room fan-out under the Phase 11 load test.
+- Resolution (2026-06-27): Q3 central rate-glide cap — **Resolved**: trust clients for the local ±10% cosmetic glide; only the authoritative `playback:rate` is server-validated against the allowed set.
+- Resolution (2026-06-27): Q4 YouTube granularity vs 500 ms deadband — **Resolved**: acceptable (deadband ≈ 2× API jitter); raise soft-band hysteresis above 200 ms only if Phase 3 QA shows boundary oscillation.
+- Resolution (2026-06-27): Q5 clock re-handshake cadence — **Resolved**: 30 s + on `visibilitychange`, exposed as a transport config constant; tune from offset-variance telemetry.
+
 ---
 
 ## 13. Cross-References

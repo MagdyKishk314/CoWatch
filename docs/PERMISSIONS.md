@@ -6,6 +6,8 @@
 **Owner agent:** Backend Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved all five Permissions Open Questions per Chief Architect RESOLUTIONS — OQ-1 (`chatLock` suppresses Guest + Member), OQ-2 (`room_bans` collection), OQ-3 (`room:member:update` event), OQ-4 (`join_requests` collection), OQ-5 (`playlistAuthority` first-class field).
+
 ---
 
 ## 0. Context & Sources
@@ -113,6 +115,8 @@ The canon matrix shows `chat lock` and `playlist lock` as **toggle** permissions
 - These are deliberately asymmetric with playback: playback authority is governed solely by `SyncAuthority` (there is no separate "playback lock"); a stricter `owner_only` mode is the equivalent of locking playback.
 
 > **Open Question (OQ-1):** Should `chatLock = on` suppress Member chat, or only Guest chat? Canon marks Member `send chat = ✓` (unconditional) and Guest `= ◐`. **Recommendation:** lock suppresses both Guest *and* Member (matching Discord "lock channel" semantics); leave Owner/Moderator able to speak. Tracked in §9.
+>
+> **Resolution (2026-06-27):** `chatLock = on` suppresses chat for **both Guest and Member**; Owner and Moderator are exempt and may still speak (Discord lock semantics). Below-Moderator sends are rejected with `CHAT_LOCKED`. — Status: **Resolved**.
 
 ---
 
@@ -138,6 +142,8 @@ export interface RoomPermissionConfig {
 ```
 
 These fields are **embedded** in `Room.settings` (canon §4: room settings are embedded, owned, bounded, read-with-parent).
+
+> **Resolution (OQ-5, 2026-06-27):** `playlistAuthority` is a **first-class, `SyncAuthority`-typed per-room field**, configured **independently** of `syncAuthority` (playback). It gates `room:playlist:*` for **Members** (Owner/Moderator bypass; Members are also blocked when `playlistLock = on`). Its three modes are identical to `SyncAuthority` (`owner_only` | `owner_moderators` | `everyone`). **Canonical field name = `playlistAuthority`** — `docs/DATABASE.md` renames the prior `syncAuthorityPlaylist` → `playlistAuthority` in `RoomSettings`. Per RESOLUTION B6 this is a data/contract-model change (history + context), **not an ADR**. — Status: **Resolved**.
 
 ### 4.1 Mode → eligible roles for playback control
 
@@ -403,6 +409,8 @@ Timestamps are UTC ISO-8601 (canon §10). A background sweep (or lazy check on n
 - **Ban** is recorded so it survives the member leaving. Since the `Membership` is removed on ban, the deny record needs durability beyond it. **Recommendation:** an embedded `bans[]` snapshot on `Room` is rejected (unbounded growth violates canon §4 "never embed an unbounded growing list"). Instead, ban records live in a referenced collection.
 
 > **Open Question (OQ-2):** Canon's collection list (§4) does not include a `room_bans` collection. Banning needs durable, queryable, independently-grown records ⇒ a separate collection is the canon-correct shape. **Recommendation:** add collection `room_bans` (`snake_case`, plural) with unique index `(roomId, userId)` and optional `expiresAt`; raise via ADR + history + context update (R3/R4) since it extends the canonical data model. Tracked in §9.
+>
+> **Resolution (2026-06-27):** Durable bans live in the new `room_bans` collection — unique `(roomId, userId)` with optional `expiresAt` TTL for temp-bans (indefinite when omitted). The collection outlives `Membership` removal so the deny survives the kick-on-ban. Added to canon §3 collection list; modeled in `docs/DATABASE.md`. Per RESOLUTION B3, this is a data/contract-model change (history + context), **not an ADR**. — Status: **Resolved**.
 
 ### 7.5 The rank rule (`canActOn`)
 
@@ -422,10 +430,32 @@ allow ⇔ rank(actor) > rank(target)
 On any moderation action the server emits the relevant canon events:
 
 - Kick/Ban → `room:member:leave` (with `reason`) to the room; the target's transport is force-unsubscribed from the room topic. Ban additionally records the deny.
-- Mute/Timeout → `room:settings:update` is **not** used; instead a member-state update is broadcast (e.g., `room:member:update`) so clients re-render affordances. Voice mute additionally propagates to the LiveKit channel (canon §5 voice).
+- Mute/Timeout → `room:settings:update` is **not** used; instead a `room:member:update` event is broadcast (server→client only, no ack) so clients re-render affordances. Voice mute additionally propagates to the LiveKit channel (canon §5 voice).
+- Role change (manage roles) → `room:member:update` carrying the new `role` so all clients re-derive that member's affordances (without a join/leave).
 - All carry the shared `correlationId`.
 
+The canonical `room:member:update` payload (B5) covers member-state changes that are **not** a join/leave:
+
+```jsonc
+// room:member:update — server→client only, no inbound intent, no ack.
+// Ordered per-topic by meta.seq; buffered in the resume ring.
+{
+  "roomId": "…",
+  "userId": "…",
+  "memberId": "…",
+  "role": "Moderator",                 // optional — present on role change
+  "moderationState": {                  // optional — present on mute/timeout change
+    "muted": true,
+    "mutedUntil": null,                 // ISO-8601 UTC or null (indefinite)
+    "timeoutUntil": "2026-06-27T..."    // ISO-8601 UTC or null
+  },
+  "reason": "…"                         // optional
+}
+```
+
 > **Open Question (OQ-3):** Canon §3's room events list `room:member:join`, `room:member:leave`, `room:ownership:transfer`, `room:settings:update` but no explicit `room:member:update` / `room:member:mute`. Mute/timeout need a member-state broadcast. **Recommendation:** add `room:member:update` to the `room` namespace via ADR/context update; until then, piggyback on a `room:member:leave`+`join` is incorrect — prefer the new event. Tracked in §9.
+>
+> **Resolution (2026-06-27):** Add `room:member:update` to the `room` namespace, **server→client only** (no inbound intent, no ack), for member-state changes without join/leave (mute, timeout, role change). Payload `{ roomId, userId, memberId, role?, moderationState?{ muted?, mutedUntil?, timeoutUntil? }, reason? }`; ordered per-topic by `meta.seq` and buffered in the resume ring. Added to canon §3 event catalog and `docs/EVENTS.md`; per RESOLUTION B5 this is a contract-model change (history + context), **not an ADR**. — Status: **Resolved**.
 
 ---
 
@@ -477,20 +507,24 @@ sequenceDiagram
 - Duplicate concurrent requests by the same user collapse to a single pending request (unique pending `(roomId, userId)`).
 
 > **Open Question (OQ-4):** Canon's collection list does not name a `join_requests` collection. The waiting-room queue needs durable, independently-queried records ⇒ a separate collection. **Recommendation:** add `join_requests` (unique partial index on `(roomId, userId)` where `status = pending`); raise via ADR/context (R3/R4). Tracked in §9.
+>
+> **Resolution (2026-06-27):** The join-approval waiting queue persists in the new `join_requests` collection — partial-unique `(roomId, userId)` where `status = pending` (collapsing duplicate concurrent requests) plus an `expiresAt` TTL ≈ 10 min so stale pending requests auto-expire. Status lifecycle `pending → approved | denied | expired`. Added to canon §3 collection list; modeled in `docs/DATABASE.md`. Per RESOLUTION B3, this is a data/contract-model change (history + context), **not an ADR**. — Status: **Resolved**.
 
 ---
 
 ## 9. Open Questions (with recommendations)
 
-| # | Question | Recommendation | Process |
-|---|---|---|---|
-| **OQ-1** | Does `chatLock` suppress Member chat or only Guest chat? | Suppress both Guest and Member; keep Owner/Moderator speaking (Discord "lock" semantics). | Confirm with Chief Architect; record in Rooms spec. |
-| **OQ-2** | Where do durable **ban** records live? Canon §4 lists no ban collection. | Add `room_bans` collection (`(roomId, userId)` unique, optional `expiresAt`). | ADR + history + context + repomix (R3/R4). |
-| **OQ-3** | Need a realtime event for mute/timeout state changes (none in canon §3). | Add `room:member:update` to the `room` namespace. | ADR/context update. |
-| **OQ-4** | Where do **join requests** persist? Canon §4 lists no such collection. | Add `join_requests` collection with partial-unique pending index. | ADR + history + context (R3/R4). |
-| **OQ-5** | Is `playlistAuthority` a real separate field, or does playlist control follow `playlistLock` only? Canon §6 says modes "separately configurable" for playlist. | Treat `playlistAuthority` as a first-class field mirroring `SyncAuthority`. | Confirm in Rooms spec; reflect in Prisma schema. |
+> **All five resolved 2026-06-27** by Chief Architect RESOLUTIONS (blockers B3/B5/B6 + PERM OQ-1). None require an ADR — each is a data/contract-model change tracked via history + context (R3/R4). See the per-section Resolution notes (§3.2, §4, §7.4, §7.6, §8.2) for detail.
 
-These items extend the canonical data/event model and therefore require the R3/R4 process (ADR + history + context + repomix) before implementation — they are **not** silently assumed.
+| # | Question | Resolution (2026-06-27) | Status |
+|---|---|---|---|
+| **OQ-1** | Does `chatLock` suppress Member chat or only Guest chat? | Suppress **both Guest and Member**; Owner/Moderator exempt (Discord "lock" semantics). Below-Mod sends rejected with `CHAT_LOCKED`. | **Resolved** |
+| **OQ-2** | Where do durable **ban** records live? Canon §4 lists no ban collection. | New `room_bans` collection — unique `(roomId, userId)`, optional `expiresAt` TTL for temp-bans; outlives `Membership` removal (B3). No ADR. | **Resolved** |
+| **OQ-3** | Need a realtime event for mute/timeout/role state changes (none in canon §3). | New `room:member:update` (server→client only, no ack) on the `room` namespace; payload `{ roomId, userId, memberId, role?, moderationState?, reason? }` (B5). No ADR. | **Resolved** |
+| **OQ-4** | Where do **join requests** persist? Canon §4 lists no such collection. | New `join_requests` collection — partial-unique `(roomId, userId)` where `status = pending` + `expiresAt` TTL ≈ 10 min (B3). No ADR. | **Resolved** |
+| **OQ-5** | Is `playlistAuthority` a real separate field, or does playlist control follow `playlistLock` only? | First-class `SyncAuthority`-typed `playlistAuthority` field, configured independently of `syncAuthority`; gates `room:playlist:*` for Members (B6). `DATABASE.md` renames `syncAuthorityPlaylist` → `playlistAuthority`. No ADR. | **Resolved** |
+
+These items extend the canonical data/event model and were cleared via the R3/R4 process (history + context); per RESOLUTIONS §0.3 / PROC-2, adding a collection/field/event is a data/contract-model change and does **not** itself produce an ADR.
 
 ---
 

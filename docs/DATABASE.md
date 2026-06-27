@@ -6,6 +6,8 @@
 **Owner agent:** Backend Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Added `room_bans` + `join_requests` models (B3), confirmed `activity_events`/`role_assignments`/`votes` (B3/B4), added `playlistAuthority` to `RoomSettings` (B6, renamed from `syncAuthorityPlaylist`), and resolved DB Open Questions per the Chief Architect's RESOLUTIONS.
+
 > Canon compliance: this document implements [ADR-003 — Prisma over MongoDB](../adr/ADR-003-prisma-mongodb.md) and conforms to [Architecture Canon §4 — Data-Modeling Conventions](../context/architecture.md#4-data-modeling-conventions-mongodb--prisma), [§3 — Naming Conventions](../context/architecture.md#3-naming-conventions), and [§10 — Cross-Cutting Non-Negotiables](../context/architecture.md#10-cross-cutting-non-negotiables). The schema below is the **authoritative persisted shape** of the [Domain Model](./DOMAIN.md). Collection names, type names, enum members, and id strategy match the canon verbatim.
 
 ---
@@ -100,6 +102,8 @@ The schema materializes exactly the [DOMAIN aggregate map](./DOMAIN.md#2-aggrega
 | `PlaybackState` | type `PlaybackState` | — | embedded |
 | `Membership` | model `Membership` | `memberships` | collection |
 | `ModerationState` | type `ModerationState` | — | embedded |
+| `RoomBan` | model `RoomBan` | `room_bans` | collection |
+| `JoinRequest` | model `JoinRequest` | `join_requests` | collection |
 | `RoleAssignment` | model `RoleAssignment` | `role_assignments` | collection (append-only) |
 | `Playlist` | model `Playlist` | `playlists` | collection |
 | `QueueItem` | model `QueueItem` | `queue_items` | collection |
@@ -115,7 +119,9 @@ The schema materializes exactly the [DOMAIN aggregate map](./DOMAIN.md#2-aggrega
 | `VoiceChannel` | model `VoiceChannel` | `voice_channels` | collection |
 | `InviteLink` | model `InviteLink` | `invite_links` | collection |
 
-> The canon names 14 collections explicitly; this schema adds `role_assignments`, `votes`, `activity_events` per the [DOMAIN aggregate map](./DOMAIN.md#2-aggregate-map). Adding a collection is a data-model change → it travels with this document's history/context update (R3/R4), not an ADR (no architecture decision changes).
+> The canon names 14 collections explicitly; this schema adds `role_assignments`, `votes`, `activity_events`, and (per the 2026-06-27 RESOLUTIONS B3) `room_bans` + `join_requests` per the [DOMAIN aggregate map](./DOMAIN.md#2-aggregate-map). Adding a collection is a data-model change → it travels with this document's history/context update (R3/R4), not an ADR (no architecture decision changes).
+>
+> **Amended 2026-06-27 (B3):** `room_bans` (durable bans that outlive membership deletion) and `join_requests` (pending join-approval queue) are added as first-class collections; `activity_events` (B3), `role_assignments` (B4), and `votes` (B4) are confirmed present with the canon-mandated indexes. These are added to the [Architecture Canon §3](../context/architecture.md#3-naming-conventions) collection list alongside this change.
 
 ---
 
@@ -212,6 +218,14 @@ enum RoleAssignmentReason {
   system
 }
 
+enum JoinRequestStatus {
+  pending
+  approved
+  rejected
+  cancelled
+  expired
+}
+
 enum MediaProvider {
   youtube
 }
@@ -306,11 +320,11 @@ type RefreshTokenFamily {
 }
 
 type RoomSettings {
-  syncAuthorityPlayback SyncAuthority @default(owner_only)
-  syncAuthorityPlaylist SyncAuthority @default(owner_moderators)
-  chatLocked            Boolean       @default(false)
-  playlistLocked        Boolean       @default(false)
-  joinApprovalRequired  Boolean       @default(false)
+  syncAuthorityPlayback SyncAuthority @default(owner_only)        // gates room:playback:* (playback authority)
+  playlistAuthority     SyncAuthority @default(owner_moderators)  // B6: first-class, gates room:playlist:* independently of playback authority
+  chatLocked            Boolean       @default(false)             // PERM OQ-1: chatLock=on suppresses BOTH Guest and Member chat; Owner/Mod exempt
+  playlistLocked        Boolean       @default(false)             // when on, Members are blocked from room:playlist:* even if playlistAuthority=everyone
+  joinApprovalRequired  Boolean       @default(false)             // when on, joins create a JoinRequest (join_requests) instead of an immediate Membership
   nsfw                  Boolean       @default(false)
   tags                  String[]      @default([]) // capped, lowercased (app-enforced)
   maxMembers            Int?
@@ -532,6 +546,46 @@ model RoleAssignment {
   @@map("role_assignments")
 }
 
+model RoomBan {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  roomId       String    @db.ObjectId
+  userId       String    @db.ObjectId // subject of the ban — durable, survives Membership deletion
+  bannedById   String    @db.ObjectId // moderator/owner who issued the ban
+  reason       String?
+  expiresAt    DateTime? // null = permanent; set for temp-ban → TTL sweep (§7)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([roomId, userId], map: "uniq_room_bans_room_user") // B3: one active ban row per (room,user); enforces ban-on-rejoin
+  @@index([userId])                                            // "rooms this user is banned from"
+  @@index([expiresAt])                                         // temp-ban TTL/expiry sweep (§7)
+  @@map("room_bans")
+}
+
+model JoinRequest {
+  id            String            @id @default(auto()) @map("_id") @db.ObjectId
+  roomId        String            @db.ObjectId
+  userId        String            @db.ObjectId // requester
+  status        JoinRequestStatus @default(pending)
+  message       String?           // optional note to approvers
+  userDisplayName String          // denorm ← User.profile.displayName (approver list render)
+  userAvatarUrl String?           // denorm ← User.profile.avatarUrl
+  resolvedById  String?           @db.ObjectId // moderator/owner who approved/rejected
+  resolvedAt    DateTime?
+  expiresAt     DateTime          // ≈ createdAt + 10 min; drives TTL/expiry (§7)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  // B3: partial-unique on (roomId, userId) WHERE status = pending — only one OPEN request per (room,user).
+  // Prisma cannot express a partial filter declaratively; the @@unique below documents intent and the
+  // partial filter expression { status: "pending" } is applied via out-of-band migration (§7 / §8).
+  @@unique([roomId, userId], map: "uniq_join_requests_room_user_pending") // partial: WHERE status = pending (migration-applied)
+  @@index([roomId, status, createdAt]) // approver queue: pending requests for a room, oldest first
+  @@index([userId, status])            // "my outstanding join requests"
+  @@index([expiresAt])                 // pending-request expiry/TTL sweep (§7)
+  @@map("join_requests")
+}
+
 // ============================================================================
 // PLAYLIST / MEDIA
 // ============================================================================
@@ -750,6 +804,20 @@ Each note states *what is embedded, what is referenced, and why* — the decisio
 - **Separate, append-only.** Not embedded on `Membership` (role history grows unbounded and is queried independently for audit — a hard-rule case and [DOMAIN Open Q #4](./DOMAIN.md#8-open-questions)).
 - **No `updatedAt`, no soft delete** — it is an immutable audit log. Retained per [§7](#7-data-retention--ttl-policy).
 
+### 4.6a `room_bans` (B3 — resolves PERMISSIONS OQ-2)
+
+- **Separate collection, never embedded on `Membership`.** A ban must **outlive membership deletion** — when a kicked/banned user's `Membership` is removed (or they leave), the ban record persists so a rejoin attempt is rejected. Embedding the ban on `Membership` would lose the ban the moment the membership row goes away, which is exactly the wrong behavior.
+- **Referenced:** `roomId`, `userId`, `bannedById`.
+- **Uniqueness:** `(roomId, userId)` unique guarantees one active ban row per user per room and makes the rejoin check a point lookup.
+- **TTL:** optional `expiresAt` supports **temp-bans** — a native TTL index removes the row when it passes; a null `expiresAt` is a permanent ban with no TTL ([§7](#7-data-retention--ttl-policy)).
+
+### 4.6b `join_requests` (B3 — resolves PERMISSIONS OQ-4)
+
+- **Separate collection.** The pending join-approval queue for rooms with `settings.joinApprovalRequired = true`. Unbounded over a room's lifetime and queried independently by approvers, so never embedded on `Room`.
+- **Referenced:** `roomId`, `userId`, `resolvedById`. **Denormalized** `userDisplayName`/`userAvatarUrl` let the approver queue render without touching `users`.
+- **Partial-uniqueness:** `(roomId, userId)` is unique **only `WHERE status = pending`** — a user may have at most one *open* request per room but can re-request after a prior request resolves (approved/rejected/expired). Prisma cannot express the partial filter declaratively, so the `@@unique` documents intent and the partial filter expression is applied out-of-band (mirrors the `emailLower`/`usernameLower` pattern; see [§8](#8-open-questions)).
+- **TTL:** `expiresAt` (≈ `createdAt + 10 min`) auto-expires unanswered requests so the approver queue self-cleans; the [expiry sweep](#72-sweep-jobs-conditional--cascading--cannot-be-a-raw-ttl-index) flips `status = expired` before hard removal.
+
 ### 4.7 `playlists` & `queue_items`
 
 - **Playlist is a thin 1:1 root** (unique on `roomId`) holding ordering metadata (`currentItemId`, denormalized `itemCount`). It does **not** embed items.
@@ -834,6 +902,8 @@ Indexes follow the [canon §4 pattern](../context/architecture.md#4-data-modelin
 - `dm_threads`: `participantKey` unique (one thread per pair).
 - `voice_channels`: `livekitRoom` unique (stable SFU mapping).
 - `invite_links`: `token` unique (redemption lookup).
+- `room_bans`: `(roomId, userId)` unique (one active ban per user per room; rejoin check is a point lookup). *(B3)*
+- `join_requests`: `(roomId, userId)` **partial-unique `WHERE status = pending`** (one open request per user per room; partial filter applied out-of-band — see [§8](#8-open-questions)). *(B3)*
 
 ### 6.3 Query-pattern compound indexes (ESR-ordered)
 
@@ -849,6 +919,12 @@ Indexes follow the [canon §4 pattern](../context/architecture.md#4-data-modelin
 | `friend_requests (addresseeId, status, createdAt)` | inbound pending requests |
 | `dm_threads (participantIds, lastMessageAt desc)` | DM inbox by recency (multikey + sort) |
 | `votes (queueItemId, kind)` | tally re-derivation per kind |
+| `role_assignments (roomId, createdAt)` | room role-history audit, chronological *(B4)* |
+| `role_assignments (membershipId, createdAt)` | per-membership role history *(B4)* |
+| `room_bans (userId)` | "rooms this user is banned from" *(B3)* |
+| `join_requests (roomId, status, createdAt)` | approver queue: pending requests for a room, oldest first *(B3)* |
+| `join_requests (userId, status)` | "my outstanding join requests" *(B3)* |
+| `activity_events (userId, createdAt)` | chronological social feed *(B3 confirm)* |
 
 ### 6.4 Text / search indexes
 
@@ -883,8 +959,10 @@ Retention is enforced by a mix of **MongoDB native TTL indexes** (for time-bomb 
 | `users` (guests) | `guestExpiresAt` | expire guest accounts at `guestExpiresAt` | **Conditional** — guests only. Because TTL cannot filter by `kind`, guest cleanup runs as a **sweep job** (see §7.2), not a raw TTL index, to avoid expiring registered users that have a null field |
 | `friend_requests` | `expiresAt` | expire stale pending requests | TTL `expireAfterSeconds: 0`; the [expiry transition](./DOMAIN.md#63-friend-request-lifecycle) sets `status = expired` via the sweep before/at hard removal |
 | `invite_links` | `expiresAt` | remove expired tokens | TTL `expireAfterSeconds: 0`; revoked links backdate `expiresAt` |
+| `room_bans` | `expiresAt` | expire **temp-bans** at `expiresAt` | TTL `expireAfterSeconds: 0`; **permanent bans have a null `expiresAt`** and are never expired (TTL skips null-keyed docs). *(B3)* |
+| `join_requests` | `expiresAt` | expire stale **pending** requests (≈10 min) | TTL `expireAfterSeconds: 0`; the [expiry sweep](#72-sweep-jobs-conditional--cascading--cannot-be-a-raw-ttl-index) flips `status = expired` before/at hard removal. *(B3)* |
 | `notifications` | `createdAt` | retain 90 days | TTL `expireAfterSeconds: 7776000` — feed is ephemeral; read state is not durable history |
-| `activity_events` | `createdAt` | retain 180 days | TTL `expireAfterSeconds: 15552000` — append-only stream, rolling window |
+| `activity_events` | `createdAt` | retain 180 days | TTL `expireAfterSeconds: 15552000` — append-only stream, rolling window *(B3 confirm)* |
 
 ### 7.2 Sweep jobs (conditional / cascading — cannot be a raw TTL index)
 
@@ -893,6 +971,7 @@ Retention is enforced by a mix of **MongoDB native TTL indexes** (for time-bomb 
 | **Guest reaper** | every 15 min | hard-delete `users` where `kind = guest` AND `guestExpiresAt < now`; cascade-delete their `sessions`, `memberships`, transient `presence`. (Conditional on `kind`, so not a raw TTL index.) |
 | **Ephemeral-room teardown** | every 1 min | for `rooms` where `lifecycle = temporary` AND `status = teardown_scheduled` AND `teardownAt < now`: set `status = archived`, `deletedAt = now`; cascade soft-delete `memberships`, `voice_channels`, `invite_links`; schedule `messages`/`queue_items` purge. Implements the [Room lifecycle](./DOMAIN.md#61-room-lifecycle). |
 | **Friend-request expirer** | every 5 min | set `status = expired` on `pending` requests past `expiresAt` (state transition) before TTL hard-removes the row. |
+| **Join-request expirer** | every 1 min | set `status = expired` on `pending` `join_requests` past `expiresAt` (state transition) before the TTL index hard-removes the row, so the approver queue and the partial-unique constraint stay consistent. *(B3)* |
 | **Soft-delete purger** | nightly | hard-delete rows soft-deleted (`deletedAt`) beyond the grace window (default **30 days**): archived `rooms` and their `messages`/`queue_items`/`playlists`, deleted `users` (post legal hold), tombstoned `messages`. |
 | **Denorm reconciler** | every 10 min | re-derive `viewerCount`, `itemCount`, `tally`, `activeParticipantCount` from source collections to repair drift (see [§5](#5-denormalization--source-of-truth-register)). |
 | **Session-family pruner** | hourly | hard-delete revoked `sessions` whose `expiresAt` already passed, in case TTL lagged; collapse reuse-detected families. |
@@ -901,6 +980,7 @@ Retention is enforced by a mix of **MongoDB native TTL indexes** (for time-bomb 
 
 - **Messages are retained for the life of their channel**, not on a clock — chat history is product data. They are purged only when their room is archived-and-purged (room teardown grace) or when a DM thread is deleted. Tombstoned (deleted) messages keep their row for thread integrity until the room/thread purge.
 - **`role_assignments` and `friendships` have no TTL** — audit and social graph are durable history.
+- **`room_bans` are durable by default** — a permanent ban (`expiresAt: null`) is never expired and **outlives the banned user's membership deletion**, so a rejoin is rejected on a point lookup. Only temp-bans (non-null `expiresAt`) are TTL-reaped. *(B3)*
 - **Soft delete first, hard delete on a grace window.** Nothing is hard-deleted immediately except guests and expired tokens; a 30-day grace supports recovery, abuse investigation, and accidental-delete reversal.
 - **Right-to-erasure (GDPR-style):** a user-deletion request soft-deletes immediately, anonymizes denormalized snapshots (`authorDisplayName` → "Deleted User") via a one-shot job, and schedules hard purge after any legal-hold window. Tracked as an [open question](#8-open-questions) pending the privacy spec.
 - **PII minimization:** `sessions` store `ipRegion` (coarse geo), never raw IP, at rest. `totpSecretEnc` and `recoveryCodeHashes` are encrypted/hashed; they are excluded from any export.
@@ -909,14 +989,20 @@ Retention is enforced by a mix of **MongoDB native TTL indexes** (for time-bomb 
 
 ## 8. Open Questions
 
-| # | Question | Recommendation |
-|---|---|---|
-| 1 | Should `emailLower` / `usernameLower` uniqueness be partial (exclude soft-deleted) — which MongoDB supports but Prisma cannot express declaratively? | Create the unique indexes as **partial filter expressions** (`deletedAt: null`) via an out-of-band migration; document the divergence from the Prisma `@@unique`. Confirm in the auth spec. |
-| 2 | Is `Json` the right type for `Notification.payload` / `ActivityEvent.payload`, or should each type get a concrete embedded `type`? | Keep `Json` for v1 (open set of types, fast iteration); validate with per-`type` DTOs. Revisit if query-on-payload becomes a need. |
-| 3 | Atlas Search vs. self-hosted `$text` — which is the default, given Docker-first / VPS targets (ADR-010)? | Default to **Atlas Search** in managed prod; ship a **`$text` + prefix-index fallback** for self-hosted/VPS so search degrades gracefully. Needs a DevOps + Discovery decision. |
-| 4 | Should `messages` be **time-sharded** (per-room rolling collections) at scale, or stay a single collection with the `(channelId, createdAt)` index? | Single collection for v1; the index handles expected volume. Reserve a sharding/archival ADR for when a room's message count or total collection size warrants it. |
-| 5 | Right-to-erasure: hard-delete vs. crypto-shred for users with denormalized snapshots scattered across `messages`/`queue_items`? | **Anonymize-in-place** the denormalized snapshots + soft-delete the `User`, then hard-purge after legal hold — avoids chasing every snapshot synchronously. Finalize in the privacy spec. |
-| 6 | Does `PlaybackState.serverEpochMs` as `Float` risk precision loss at large epoch values? | `Float` (double) holds epoch-ms exactly well past year 2100; acceptable. If sub-ms or BigInt precision is ever required, switch to `BigInt` — flagged for the Realtime Engineer. |
+> Amended 2026-06-27: All six DB Open Questions below were ruled on by the Chief Architect (RESOLUTIONS DB OQ-1…OQ-6). The **Resolution** column records each decision and its status. None of these is an architectural-decision change → history+context update only, no ADR (R3/R4).
+
+| # | Question | Recommendation | Resolution (2026-06-27) |
+|---|---|---|---|
+| 1 | Should `emailLower` / `usernameLower` uniqueness be partial (exclude soft-deleted) — which MongoDB supports but Prisma cannot express declaratively? | Create the unique indexes as **partial filter expressions** (`deletedAt: null`) via an out-of-band migration; document the divergence from the Prisma `@@unique`. Confirm in the auth spec. | **DB OQ-1:** Create `emailLower`/`usernameLower` partial-unique indexes (`deletedAt: null`) via an out-of-band migration; document the divergence from Prisma `@@unique` and confirm in `specs/auth.spec.md` + `history/migrations.md`. The same partial-index mechanism applies to `join_requests` (`WHERE status = pending`). — **Status: Resolved.** |
+| 2 | Is `Json` the right type for `Notification.payload` / `ActivityEvent.payload`, or should each type get a concrete embedded `type`? | Keep `Json` for v1 (open set of types, fast iteration); validate with per-`type` DTOs. Revisit if query-on-payload becomes a need. | **DB OQ-2:** Keep `Json` payloads with per-type DTO validation at the service boundary; revisit only if query-on-payload becomes a need. — **Status: Resolved.** |
+| 3 | Atlas Search vs. self-hosted `$text` — which is the default, given Docker-first / VPS targets (ADR-010)? | Default to **Atlas Search** in managed prod; ship a **`$text` + prefix-index fallback** for self-hosted/VPS so search degrades gracefully. Needs a DevOps + Discovery decision. | **DB OQ-3:** Atlas Search is the managed-prod default; `$text` + prefix-index is the self-hosted fallback; native Mongo text indexes ship first and an external search engine + ADR comes only if discovery acceptance fails. — **Status: Deferred-to-Phase-7** (see [§6.4](#64-text--search-indexes), `docs/PHASES.md` P7). |
+| 4 | Should `messages` be **time-sharded** (per-room rolling collections) at scale, or stay a single collection with the `(channelId, createdAt)` index? | Single collection for v1; the index handles expected volume. Reserve a sharding/archival ADR for when a room's message count or total collection size warrants it. | **DB OQ-4:** `messages` stays a single collection for v1; a sharding/archival ADR is reserved for when room message count or collection size warrants it. — **Status: Deferred-to-Phase-7+.** |
+| 5 | Right-to-erasure: hard-delete vs. crypto-shred for users with denormalized snapshots scattered across `messages`/`queue_items`? | **Anonymize-in-place** the denormalized snapshots + soft-delete the `User`, then hard-purge after legal hold — avoids chasing every snapshot synchronously. Finalize in the privacy spec. | **DB OQ-5:** GDPR right-to-erasure = **anonymize-in-place** denormalized snapshots + soft-delete the `User`, then hard-purge after the legal-hold window. Finalize in the privacy spec. — **Status: Deferred-to-Post-MVP.** |
+| 6 | Does `PlaybackState.serverEpochMs` as `Float` risk precision loss at large epoch values? | `Float` (double) holds epoch-ms exactly well past year 2100; acceptable. If sub-ms or BigInt precision is ever required, switch to `BigInt` — flagged for the Realtime Engineer. | **DB OQ-6:** `serverEpochMs` as `Float` (double) holds epoch-ms exactly well past year 2100 — **keep `Float`.** Switch to `BigInt` only if sub-ms/BigInt precision is ever required. — **Status: Resolved.** |
+
+### 8.1 Sharding posture (ARCH OQ-2)
+
+Collection sharding is **deferred**; when adopted, the shard key for room-scoped collections (`memberships`, `messages`, `queue_items`, `votes`, `role_assignments`, `room_bans`, `join_requests`) is **`roomId`**, decided in a dedicated sharding ADR at adoption. — **Status: Deferred-to-Phase-7** (mirrors `docs/ARCHITECTURE.md` §10).
 
 ---
 

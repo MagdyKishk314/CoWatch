@@ -6,6 +6,8 @@
 **Owner agent:** DevOps Engineer
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved Open Questions §11 per Chief Architect rulings — Redis pub/sub + per-room authority lock is the canonical VPS multi-instance mechanism (= ADR-011), Durable Objects the long-term serverless answer; orchestrator/managed-services/registry/backup-provider decisions deferred to Phase 12 with their decisions recorded.
+
 Canonical source of truth: [Architecture Canon](../context/architecture.md). On any conflict, the canon wins. This document elaborates [ADR-010 (Docker-first delivery)](../adr/ADR-010-docker-first.md) and the deployment implications of [ADR-004 (Realtime transport abstraction)](../adr/ADR-004-realtime-abstraction.md), [ADR-005 (LiveKit)](../adr/ADR-005-livekit.md), and [ADR-009 (MinIO)](../adr/ADR-009-minio-storage.md).
 
 ---
@@ -490,11 +492,11 @@ Reinforces canon §10; full detail in [SECURITY.md](./SECURITY.md).
 
 | # | Question | Recommendation |
 |---|---|---|
-| OQ-1 | Multi-instance `native-ws` fan-out: Redis pub/sub + per-room authority lock, or sticky-by-room routing? | **Start with Redis pub/sub + a per-room authority lock** (works behind any LB); migrate hot rooms to the `durable-object` adapter when edge scale demands it. Needs an ADR before Phase 12. |
-| OQ-2 | Orchestrator for `production`: Docker Swarm vs. Kubernetes vs. compose-on-a-bigger-VPS? | **Begin with Docker Compose on a VPS** (matches `vps` target exactly, lowest ops cost); adopt **K8s** only when horizontal `server`/LiveKit scaling is proven necessary. Defer; ADR at Phase 12. |
-| OQ-3 | Managed vs. self-hosted Mongo/MinIO/LiveKit in `production`. | **Self-host on VPS for launch** (cost + data control), keep `DATABASE_URL`/`MINIO_ENDPOINT`/`LIVEKIT_URL` swappable so **Atlas / S3 / LiveKit Cloud** are a config change, not a code change. |
-| OQ-4 | CI registry: GHCR vs. a self-hosted registry. | **GHCR** for launch (free, OIDC-native); revisit if egress/cost or air-gapped builds require a private registry. |
-| OQ-5 | Backup destination provider (must be off-host & ideally off-provider). | Pick a **second, independent** object-storage provider/region for Mongo dumps + MinIO mirror; decide provider at Phase 12 budgeting. |
+| OQ-1 | Multi-instance `native-ws` fan-out: Redis pub/sub + per-room authority lock, or sticky-by-room routing? | **Start with Redis pub/sub + a per-room authority lock** (works behind any LB); migrate hot rooms to the `durable-object` adapter when edge scale demands it. Needs an ADR before Phase 12. <br>**Resolution (2026-06-27):** Redis pub/sub + per-room authority lock is the **canonical VPS multi-instance mechanism (= ADR-011)**; Durable Objects is the long-term serverless answer. (DEPLOY OQ-1.) — **Status: Resolved.** |
+| OQ-2 | Orchestrator for `production`: Docker Swarm vs. Kubernetes vs. compose-on-a-bigger-VPS? | **Begin with Docker Compose on a VPS** (matches `vps` target exactly, lowest ops cost); adopt **K8s** only when horizontal `server`/LiveKit scaling is proven necessary. Defer; ADR at Phase 12. <br>**Resolution (2026-06-27):** Compose-on-VPS first; K8s only when horizontal scaling is proven necessary. (DEPLOY OQ-2.) — **Status: Deferred to Phase 12.** |
+| OQ-3 | Managed vs. self-hosted Mongo/MinIO/LiveKit in `production`. | **Self-host on VPS for launch** (cost + data control), keep `DATABASE_URL`/`MINIO_ENDPOINT`/`LIVEKIT_URL` swappable so **Atlas / S3 / LiveKit Cloud** are a config change, not a code change. <br>**Resolution (2026-06-27):** Self-host Mongo/MinIO/LiveKit; keep endpoints config-swappable to managed (Atlas / S3 / LiveKit Cloud). (DEPLOY OQ-3.) — **Status: Deferred to Phase 12.** |
+| OQ-4 | CI registry: GHCR vs. a self-hosted registry. | **GHCR** for launch (free, OIDC-native); revisit if egress/cost or air-gapped builds require a private registry. <br>**Resolution (2026-06-27):** **GHCR** for launch. (DEPLOY OQ-4.) — **Status: Deferred to Phase 12.** |
+| OQ-5 | Backup destination provider (must be off-host & ideally off-provider). | Pick a **second, independent** object-storage provider/region for Mongo dumps + MinIO mirror; decide provider at Phase 12 budgeting. <br>**Resolution (2026-06-27):** Use a **second, independent off-host backup provider**; pick the concrete provider at Phase 12 budgeting. (DEPLOY OQ-5.) — **Status: Deferred to Phase 12.** |
 
 ---
 

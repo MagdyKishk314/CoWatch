@@ -6,6 +6,8 @@
 **Owner agent:** Chief Architect
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved Open Questions §10 per Chief Architect rulings — backplane promoted to ADR-011 (B2), sharding/search deferred-to-Phase-7, sticky-or-pubsub + email-provider-interface + worker-isolation resolved.
+
 > This document is **subordinate to the canon**. On any conflict, [`../context/architecture.md`](../context/architecture.md) wins. Every type name, event name, route shape, and ADR id below matches the canon verbatim. Architectural changes here require an ADR + history entry + context update + repomix update (R3/R4).
 
 **Canon & cross-links**
@@ -680,11 +682,17 @@ Every major architectural decision in this document traces to a canon ADR. ADR f
 ## 10. Open Questions
 
 1. **Backplane ADR.** Should the Redis pub/sub backplane be promoted from "ADR-004 implementation detail" to its own ADR? **Recommendation:** yes — author `ADR-011-realtime-backplane.md` documenting Redis as the default and NATS / Durable Objects as serverless-era alternatives, since it is a load-bearing infrastructure dependency that affects scaling.
+   - **Resolution (2026-06-27):** Promote the Redis backplane to its own ADR — **ADR-011 = Redis pub/sub (fan-out) + Redis Streams (resume buffer), with Mongo change streams as secondary reconciliation**; it sits below ADR-004's transport abstraction so serverless adapters swap the bus without touching feature code. Ledger row **D-011** added (Architecture/Accepted). (ARCH OQ-1 → B2.) — **Status: Resolved.**
 2. **MongoDB sharding key.** No sharding is needed at launch (replica set suffices). **Recommendation:** defer; revisit at the discovery/scale phase with `roomId`-based sharding for room-scoped collections (`messages`, `memberships`, `queue_items`) as the leading candidate.
+   - **Resolution (2026-06-27):** Sharding deferred; shard key = `roomId` for room-scoped collections, with the sharding ADR authored at adoption. (ARCH OQ-2.) — **Status: Deferred to Phase 7.**
 3. **WSS affinity vs. connection migration.** Sticky hint is sufficient today. **Recommendation:** keep sticky-or-pubsub; only invest in seamless connection migration if LB-level sticky proves unreliable, since the resume handshake already covers reconnects.
+   - **Resolution (2026-06-27):** Keep sticky-or-pubsub; the resume handshake already covers reconnects, so seamless mid-connection migration is not pursued. (ARCH OQ-3.) — **Status: Resolved.**
 4. **Search backend.** Discovery search currently relies on Mongo text/search indexes. **Recommendation:** acceptable for launch; if cross-entity ranking/relevance becomes a product requirement, evaluate a dedicated search engine in the Discovery phase (would require its own ADR).
+   - **Resolution (2026-06-27):** Native Mongo text indexes ship first; an external search engine is adopted only if discovery acceptance fails, behind its own ADR. (ARCH OQ-4 → DB OQ-3 / PHASES-1.) — **Status: Deferred to Phase 7.**
 5. **Transactional email provider.** The provider behind verification/reset/2FA-recovery is unspecified in canon. **Recommendation:** keep it behind a `packages/shared` interface so the concrete provider is swappable without an architectural change.
+   - **Resolution (2026-06-27):** Email provider sits behind a `packages/shared` interface; the concrete provider is configuration, swappable without an architectural change. (ARCH OQ-5.) — **Status: Resolved.**
 6. **Worker isolation.** Background workers (§7.4) currently share the server image and process role. **Recommendation:** keep co-deployed at launch for simplicity; split into a dedicated worker deployment only if CPU/GC contention with the request path is observed.
+   - **Resolution (2026-06-27):** Workers stay co-deployed in the server image; split into a dedicated deployment only on observed contention. (ARCH OQ-6.) — **Status: Deferred to Phase 12.**
 
 ---
 

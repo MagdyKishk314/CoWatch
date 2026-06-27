@@ -16,6 +16,8 @@
 
 > **Conflict rule.** On any discrepancy between this document and the canon, the canon wins. The envelope shape, transport interface, event-name grammar, sync thresholds (2 s heartbeat; 500 ms / 2 s drift bands; 30 s ownership grace), and permission matrix referenced below are copied from canon and are **not** re-decided here.
 
+> Amended 2026-06-27: reconciled `room:member:update` (S→C only) to the canonical B5 payload `{ roomId, userId, memberId, role?, moderationState?{ muted?, mutedUntil?, timeoutUntil? }, reason? }` with ack/ordering/idempotency notes (resolves PERM OQ-3); recorded EVENTS OQ-1 (queue mutations = `room:playlist:*` under `room`, no top-level `playlist` namespace) and EVENTS OQ-2 (moderation intents) as Resolved.
+
 Owning NestJS module for the gateway substrate: **`RealtimeModule`** (`apps/server/src/modules/realtime/`). Domain modules (`RoomsModule`, `PlaybackModule`, `ChatModule`, `SocialModule`, `NotificationsModule`, `VoiceModule`, …) register their handlers through it. Canonical TypeScript payload types live in **`packages/types`**; the transport + envelope live in **`packages/realtime`**. No app redeclares these.
 
 ---
@@ -199,7 +201,7 @@ A client that issued `request<TReq,TRes>()` (canon transport) resolves its promi
 | `room:member:join` | S→C | n/a | `RoomMemberJoinEvent` | Broadcast to the topic: a member joined (denormalized identity). Triggers `notification:new (room.user_joined)` to owner/mods per settings. |
 | `room:member:leave` | C→S | ack | `{ roomId: Id }` | Graceful leave; unsubscribes topic. (Disconnect is handled implicitly — see §8.) |
 | `room:member:leave` | S→C | n/a | `{ roomId: Id; userId: Id; reason: 'left'\|'disconnected'\|'kicked'\|'banned' }` | Broadcast. |
-| `room:member:update` | S→C | n/a | `{ roomId: Id; userId: Id; role?: RoomRole; muted?: boolean; timeoutUntil?: EpochMs\|null }` | Membership delta (role change, mute/timeout). |
+| `room:member:update` | **S→C only** | n/a | `RoomMemberUpdateEvent` | Membership delta **without** join/leave (role change, mute, timeout, ban-side state). Server-emitted; no inbound intent (driven by `room:member:role\|mute\|ban` intents — see §5.11). Ordered per-topic by `meta.seq`, buffered in the resume ring, de-duped by envelope `id`. Resolves PERM OQ-3 / B5. |
 | `room:ownership:transfer` | S→C | n/a | `RoomOwnershipTransferEvent` | Emitted by the [transfer algorithm](../context/architecture.md#6-permission-model); re-derives permission matrix for all members. Paired with `notification:new (room.ownership_transfer)`. |
 | `room:ownership:transfer` | C→S | ack | `{ roomId: Id; nomineeUserId: Id }` | **Owner-only** explicit nomination (the action segment `POST /rooms/:id/ownership/transfer` has a realtime twin used during the grace prompt). |
 | `room:settings:update` | C→S | ack | `UpdateRoomSettingsDto` (partial) | **Owner-only** (canon §6). Server validates and broadcasts the committed settings. |
@@ -225,7 +227,25 @@ export interface RoomOwnershipTransferEvent {
         | 'auto_oldest_member' | 'returned_member_claim';
   at: EpochMs;
 }
+
+// room:member:update (S→C only) — member-state change WITHOUT join/leave (B5 / PERM OQ-3).
+// Canonical payload per RESOLUTIONS B5. Emitted by the moderation intents in §5.11
+// (room:member:role | room:member:mute | room:member:ban); never sent by a client.
+export interface RoomMemberUpdateEvent {
+  roomId: Id;
+  userId: Id;                     // the affected user
+  memberId: Id;                   // the affected Membership document id (room-scoped)
+  role?: RoomRole;                // present when this delta is a role change
+  moderationState?: {             // present when this delta is a mute/timeout/ban-side change
+    muted?: boolean;
+    mutedUntil?: EpochMs | null;  // null => indefinite mute or cleared
+    timeoutUntil?: EpochMs | null;// null => no/expired timeout
+  };
+  reason?: string;               // optional moderator-supplied reason (audit / surface to target)
+}
 ```
+
+> **Ack / ordering / idempotency for `room:member:update`.** Server-emitted, **no ack** (n/a — there is no `corr` to echo since the client never originates it). It is assigned a per-topic `meta.seq` like any other broadcast, so clients order it by `seq` (never `ts`) and detect gaps via §9. It **is** buffered in the per-topic resume ring (§8.3) — it is a discrete membership delta, not a self-superseding high-frequency frame like `playback:sync` — and is replayed on resume; clients de-dupe by envelope `id` (§9). Fields are a sparse delta: only the keys that changed are present (a role change carries `role`; a mute/timeout carries `moderationState`), and a single emit MAY carry both (e.g. a ban that also strips a moderator role). It supersedes the older flat `{ role?, muted?, timeoutUntil? }` shape; consumers read `moderationState.*` for mute/timeout state.
 
 <a id="room-snapshot"></a>**Room snapshot** (returned in the `room:member:join` ack — the late-joiner bootstrap; see §8.4):
 
@@ -272,6 +292,8 @@ export interface PlaybackSyncEvent {
 ### 5.5 Playlist / queue (`playlist` → realtime namespace `room` per canon? see note)
 
 > **Naming note.** Canon §3 fixes the eight realtime namespaces as `room, playback, chat, presence, social, notification, voice, system` — there is **no** top-level `playlist` realtime namespace. Per canon, queue mutations are part of the Room aggregate and are carried under the **`room`** namespace with a `playlist` entity segment (`room:playlist:*`), keeping the 2–3-segment grammar (`namespace:entity:action`). REST routes still nest under `/rooms/:roomId/playlist/items` (canon §3). This is the only consistent reading of canon; flagged in [Open Questions](#11-open-questions).
+>
+> **Resolution (2026-06-27) — EVENTS OQ-1: Resolved.** Binding ruling: queue mutations live in the **`room`** namespace with a `playlist` entity segment (`room:playlist:add` / `room:playlist:reorder` / `room:playlist:remove`, plus `:vote` / `:skip_vote` / `:lock`). There is **no** top-level `playlist` realtime namespace. REST stays `/rooms/:roomId/playlist/items`. (RESOLUTIONS §6 EVENTS OQ-1; canon §3.)
 
 | Type | Direction | Ack | Payload (`data`) | Notes |
 |---|---|---|---|---|
@@ -413,8 +435,8 @@ Moderation is not its own namespace; it is privileged use of `room:*`, `chat:*`,
 | Action | Intent type | Truth broadcast | Authority |
 |---|---|---|---|
 | Kick | `room:member:kick` (C→S, ack) | `room:member:leave` `{reason:'kicked'}` | Owner, Moderator |
-| Ban | `room:member:ban` (C→S, ack) | `room:member:leave` `{reason:'banned'}` + `room:member:update` | Owner, Moderator |
-| Mute / timeout | `room:member:mute` (C→S, ack) | `room:member:update` `{muted/timeoutUntil}` | Owner, Moderator |
+| Ban | `room:member:ban` (C→S, ack) | `room:member:leave` `{reason:'banned'}` + `room:member:update` `{moderationState}` | Owner, Moderator |
+| Mute / timeout | `room:member:mute` (C→S, ack) | `room:member:update` `{moderationState:{muted,mutedUntil,timeoutUntil}}` | Owner, Moderator |
 | Delete others' message | `chat:message:delete` (C→S, ack) | `chat:message:delete` tombstone | Owner, Moderator |
 | Toggle chat lock | `room:settings:update {chatLock}` (C→S, ack) | `room:settings:update` | Owner, Moderator |
 | Toggle playlist lock | `room:playlist:lock` (C→S, ack) | `room:playlist:lock` + `room:settings:update` | Owner, Moderator |
@@ -621,7 +643,9 @@ Per-connection token buckets, enforced server-side in `RealtimeModule`, layered 
 ## 11. Open Questions
 
 1. **`playlist` namespace vs. `room:playlist:*`.** Canon §3 fixes exactly eight realtime namespaces and does **not** include `playlist`, yet lists `playlist` events informally only under REST. **Recommendation (adopted above):** carry queue mutations as `room:playlist:*` under the existing `room` namespace, preserving the 2–3-segment grammar and the eight-namespace rule. If a dedicated `playlist` namespace is desired, it requires a canon change + ADR (R3). *Owner: Chief Architect.*
+   - **Resolution (2026-06-27): Queue mutations live in the `room` namespace with a `playlist` entity segment (`room:playlist:add` / `room:playlist:reorder` / `room:playlist:remove`); no top-level `playlist` namespace; REST stays `/rooms/:roomId/playlist/items` (EVENTS OQ-1). — Status: Resolved.**
 2. **Moderation sub-actions naming.** This contract introduces `room:member:kick|ban|mute|role`. These conform to the grammar but are not enumerated in canon §3's examples. **Recommendation:** ratify them in a canon update (additive, non-breaking). *Owner: Chief Architect + Social Engineer.*
+   - **Resolution (2026-06-27): `room:member:kick|ban|mute|role` C→S intents ratified (additive); the truth is `room:member:leave` (kick/ban) and `room:member:update` (mute/timeout/role) (EVENTS OQ-2 / B5). — Status: Resolved.**
 3. **`meta` block vs. envelope extension.** Server attaches `seq`/`origin`/`serverTs` via an additive `meta` sibling rather than touching the canon envelope. **Recommendation:** keep `meta` out-of-band so `RealtimeEnvelope` stays canon-frozen at `v:1`; revisit only if a transport cannot carry side-band metadata (then bump `v`). *Owner: Realtime Engineer.*
 4. **Read-receipt transport.** Notification/DM read-state is acknowledged via REST, not realtime, to keep one authoritative writer. Confirm this split is acceptable for the desktop app's offline-sync needs. *Owner: Notifications + Electron Engineers.*
 5. **Per-topic vs. global resume window.** `resumeWindowMs`/`maxResumeFrames` are currently global. High-traffic rooms may need larger buffers than self-topics. **Recommendation:** keep global for v1; make per-namespace tunable if metrics show frequent `RESUME_WINDOW_EXPIRED`. *Owner: Realtime Engineer + DevOps.*

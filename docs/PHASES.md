@@ -6,6 +6,8 @@
 **Owner agent:** Chief Architect / PM
 **Last updated: 2026-06-27**
 
+> Amended 2026-06-27: Resolved Open Questions per Chief Architect rulings — native Mongo text search first (Phase 7), DM threads as first slice of Phase 5, Phase 6 notifications in-app + realtime only, `apps/landing` parallel off-critical-path track, bounded 60 s/500-event resume buffer, and a 50-participants/room load-test target.
+
 > This document is **subordinate to the canon**. On any conflict, [`../context/architecture.md`](../context/architecture.md) wins. Every type name, event name, route shape, role, and ADR id cited below matches the canon verbatim. Re-sequencing or scope changes here require a history entry + context update + repomix update (R3/R4); architectural changes require an ADR.
 
 **Canon & cross-links**
@@ -743,16 +745,22 @@ flowchart LR
 
 1. **Search backend (Phase 7).** Native MongoDB text indexes vs an external engine (e.g., a dedicated search service) for cross-entity search at scale.
    - *Recommendation:* ship native text indexes first (no new infra, satisfies canon §4); add an ADR + external engine only if discovery latency/recall fails the acceptance bar.
+   - **Resolution (2026-06-27):** Ship native Mongo text indexes first; add an external engine + ADR only if discovery acceptance fails. (PHASES-1 / DB OQ-3.) — **Status: Deferred to Phase 7.**
 2. **DM threads timing (Phase 4 vs Phase 5).** Room chat clearly lands in Phase 4; DM threads depend on friendship gating from Phase 5.
    - *Recommendation:* build the message/channel infra in Phase 4, land DM threads as the first slice of Phase 5 to keep friend/block gating coherent.
+   - **Resolution (2026-06-27):** Build message/channel infra in Phase 4; land DM threads as the **first slice of Phase 5**. (PHASES-2.) — **Status: Resolved.**
 3. **Notification delivery beyond in-app/desktop push (email/web-push).** The canon defines the in-app feed + `notification:new`; Electron adds native push (Phase 10).
    - *Recommendation:* scope Phase 6 to in-app + realtime; defer email/web-push to a post-MVP ADR.
+   - **Resolution (2026-06-27):** Phase 6 = **in-app + realtime only**; email/web-push deferred to a post-MVP ADR. (PHASES-3.) — **Status: Resolved.**
 4. **Landing site sequencing (`apps/landing`).** Not tied to a numbered phase.
    - *Recommendation:* treat as a parallel, low-dependency track owned by the Documentation/Frontend agents; ship before Phase 12 launch but do not place it on the critical path.
+   - **Resolution (2026-06-27):** `apps/landing` is a **parallel low-dependency track**, before Phase 12, off the critical path. (PHASES-4.) — **Status: Resolved.**
 5. **Resume-buffer retention window (Phase 3/realtime).** The canon allows resume "where the server buffer allows."
    - *Recommendation:* fix a bounded per-room event buffer (e.g., last N seconds / M events); on overflow, force a fresh `playback:sync` + snapshot. Finalize the bound in [REALTIME.md](./REALTIME.md) during Phase 3 and record it in the ledger.
+   - **Resolution (2026-06-27):** Bounded per-room resume buffer = **60 s / 500 events**; overflow forces a fresh `playback:sync` + snapshot (tied to ADR-011). (PHASES-5.) — **Status: Resolved.**
 6. **Target concurrency for the < 500 ms drift load test (Phase 11).** The drift target is fixed; the concurrency at which it must hold is not.
    - *Recommendation:* set an explicit per-room participant target (e.g., 50/room) and a total-rooms target in [TESTING.md](./TESTING.md) before Phase 11 load tests.
+   - **Resolution (2026-06-27):** Load-test target = **50 participants/room** before Phase 11. (PHASES-6.) — **Status: Resolved.**
 
 ---
 

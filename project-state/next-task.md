@@ -1,9 +1,11 @@
 # Project State — Next Task
 
 > The single next task to pick up once the current task unblocks.
-> **Status:** Queued (gated on approval).
+> **Status:** Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval.
 > **Owner agent:** Backend Engineer (lead) + Frontend Engineer
 > Last updated: 2026-06-27
+
+> Amended 2026-06-27: Phase-0 open questions cleared; Phase 1 is unblocked the moment the R1 stakeholder approval (BLK-001) lands.
 
 ---
 
@@ -12,10 +14,10 @@
 | Key | Value |
 |---|---|
 | `taskId` | `P1-AUTH-KICKOFF` |
-| `title` | Phase 1 — Authentication kickoff |
+| `title` | Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval |
 | `phase` | `1` (Authentication) |
-| `status` | `queued` |
-| `precondition` | `BLK-001` cleared (stakeholder approval, R1) |
+| `status` | `ready` (gated on approval) |
+| `precondition` | `BLK-001` cleared (stakeholder approval, R1) — sole remaining gate; all architecture open questions resolved |
 | `spec` | [specs/auth.spec.md](../specs/auth.spec.md) |
 | `phasePlan` | [docs/PHASES.md](../docs/PHASES.md) |
 
