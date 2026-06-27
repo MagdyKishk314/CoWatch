@@ -1,0 +1,17 @@
+# Cowatch — pnpm workspace definition
+#
+# Purpose: declares the workspace package globs for the Turborepo monorepo (ADR-001).
+# Every app and package is a pnpm workspace member; the single lockfile + dependency
+# graph lives at the repo root.
+#
+# Status: Planning (Phase 0 — Architecture)
+# Owner agent: DevOps / Chief Architect
+# Last updated: 2026-06-27
+#
+# Canon: ../context/architecture.md (§9 Directory / Path Map)
+
+packages:
+  # Deployable applications: web, desktop (Electron), server (NestJS), landing.
+  - "apps/*"
+  # Shared libraries: ui, auth, database, realtime, social, sdk, shared, types.
+  - "packages/*"

@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -nE \"^#{1,3} \" \"d:/Software Engineering/CoWork/context/architecture.md\")",
+      "Bash(grep -nE \"^#{1,3} \" \"d:/Software Engineering/CoWork/docs/AUTH.md\")",
+      "Bash(grep -nE \"^#{1,3} \" \"/d/Software Engineering/CoWork/context/architecture.md\")",
+      "Bash(grep -niE \"^#{1,3} .*\\(front|web|desktop|electron|ui|client\\)\" \"/d/Software Engineering/CoWork/docs/ARCHITECTURE.md\")",
+      "Bash(grep -oiE \"[A-Z][A-Z0-9_]{3,}\" docs/AUTH.md)",
+      "Bash(grep -vE \"^\\(GET|POST|PUT|DELETE|PATCH|HTTP|HTTPS|JSON|HTML|SPA|API|URL|URI|RS256|TOTP|UTC|ISO|RTT|SFU|CRUD|TLS|CORS|CSRF|HSTS|UID|GID|NSFW|DM|DMS|WS|WSS|YAML|PEM|JWKS|JWT|CDN|RTP|TCP|UDP|SSH|IP|UA|VPS|OQ|ADR|RED|RPO|RTO|OIDC|SBOM|CVE|CVES|IAM|TURN|SRV\\)$\")",
+      "Bash(grep -E \"_\\(URL|KEY|SECRET|TTL|USER|PASSWORD|ENDPOINT|BUCKET|DOMAIN|ID|HOST|PORT|DSN|TRANSPORT|LEVEL|ALLOWLIST\\)$\")",
+      "Bash(ls history *)",
+      "Bash(ls project-state *)",
+      "Bash(ls instructions *)",
+      "Bash(ls prompts *)",
+      "Bash(ls repomix *)",
+      "Bash(node -e ' *)",
+      "Bash(bash -n scripts/repomix.sh)",
+      "Bash(chmod +x scripts/repomix.sh)",
+      "Bash(bash scripts/repomix.sh)",
+      "Bash(python -c \"import yaml,sys; yaml.safe_load\\(open\\('docker/docker-compose.yml'\\)\\); print\\('YAML OK: docker-compose.yml parses'\\)\")",
+      "Bash(docker compose *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import yaml; d=yaml.safe_load\\(open\\('docker/docker-compose.yml'\\)\\); print\\('YAML OK. services:', list\\(d.get\\('services',{}\\).keys\\(\\)\\)\\); print\\('networks:', list\\(d.get\\('networks',{}\\).keys\\(\\)\\)\\); print\\('volumes:', list\\(d.get\\('volumes',{}\\).keys\\(\\)\\)\\)\")"
+    ]
+  }
+}

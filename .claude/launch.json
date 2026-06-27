@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "CoWatch",
+      "runtimeExecutable": "npm",
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}

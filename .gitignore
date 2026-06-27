@@ -1,0 +1,73 @@
+# Cowatch — repository ignore rules
+# Status: Planning (Phase 0). Last updated: 2026-06-27.
+
+# ---- Dependencies ----
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# ---- Build & compile output ----
+dist/
+build/
+out/
+.next/
+.nest/
+*.tsbuildinfo
+.tsbuildinfo/
+
+# ---- Turborepo cache ----
+.turbo/
+
+# ---- Prisma generated client (re-exported via packages/database) ----
+packages/database/generated/
+**/.prisma/
+
+# ---- Electron (apps/desktop) ----
+# Packaged installers / unpacked app output from electron-builder.
+apps/desktop/out/
+apps/desktop/release/
+apps/desktop/dist-electron/
+
+# ---- Tests / coverage ----
+coverage/
+.nyc_output/
+*.lcov
+
+# ---- Environment & secrets (never commit — see canon §10) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- Editor / OS noise ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+*.swp
+
+# ---- repomix snapshots ----
+# Packed XML snapshots live in repomix/. The committed, curated snapshot is kept;
+# transient/local packs are ignored. Uncomment the line below if you do NOT want
+# any packed output tracked locally.
+# repomix/*.xml
+repomix/*.local.xml
+repomix/tmp/
+
+# ---- Claude Code local tooling (machine-specific; never commit) ----
+.claude/settings.local.json
+
+# ---- Misc temp ----
+tmp/
+.tmp/
+.cache/
