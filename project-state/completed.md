@@ -9,6 +9,23 @@
 
 ---
 
+## Phase 1 — Authentication — Slice 1 (core email/password + sessions) — 2026-06-27
+
+First implementation code (R1 approval gate cleared). Monorepo toolchain + core auth vertical; **build / lint / typecheck / test all green (21 tests)**.
+
+- [x] Monorepo build online: pnpm 9 + Turborepo (`build`/`lint`/`typecheck`/`test`).
+- [x] `packages/types` — shared auth contracts + enums.
+- [x] `packages/database` — Prisma (Mongo) auth subset: `User`, `Session` + embedded types ([docs/DATABASE.md](../docs/DATABASE.md)).
+- [x] `apps/server` NestJS — zod config, `PrismaModule`, `/api/healthz`, URI versioning, `ValidationPipe`, canon §10 error envelope.
+- [x] Auth core — argon2id hashing; RS256 access JWT + opaque rotating refresh (reuse detection → family revoke); device `Session`s.
+- [x] Auth REST — `register`/`login`/`refresh`/`logout`/`me`; httpOnly refresh cookie; `JwtAuthGuard` + `@CurrentUser`.
+- [x] Tests — 21 passing (unit + e2e via in-memory Prisma double).
+- [ ] Deferred to Slice 2: OAuth, guest, email verify, password reset, TOTP 2FA, session endpoints, real ESLint, real-Mongo integration, 90% coverage.
+
+> Recorded per R3/R4 in [history/decision-ledger.md](../history/decision-ledger.md) (Implementation decisions, IMPL-001..004). Repomix regeneration is now applicable (first code landed) — tracked as a Slice-2 follow-up.
+
+---
+
 ## Phase 0 — Open-Questions Remediation — 2026-06-27
 
 Cleared the Phase-0 open-questions punch-list under the Chief Architect's binding resolutions

@@ -1,0 +1,119 @@
+// packages/database/prisma/schema.prisma
+// Cowatch persisted data model — AUTH SUBSET (Phase 1, Slice 1).
+// Implements ADR-003 (Prisma over MongoDB). Full design: docs/DATABASE.md.
+// Subsequent slices/phases add the social, rooms, playlist, chat, and voice models.
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserKind {
+  registered
+  guest
+}
+
+enum PresenceStatus {
+  online
+  idle
+  dnd
+  offline
+}
+
+enum DevicePlatform {
+  web
+  desktop
+}
+
+// ============================================================================
+// EMBEDDED TYPES
+// ============================================================================
+
+type UserProfile {
+  username    String
+  displayName String
+  avatarUrl   String?
+  bio         String?
+}
+
+type PresenceSnapshot {
+  status       PresenceStatus @default(offline)
+  lastActiveAt DateTime?
+}
+
+type DeviceMetadata {
+  platform  DevicePlatform @default(web)
+  userAgent String?
+  ipRegion  String?
+  label     String?
+}
+
+/// Rotating refresh-token lineage for ONE device session (canon §8).
+/// `currentHash` is the SHA-256 of the active refresh secret; on rotation it
+/// moves to `previousHash` (covering the reuse grace window). A presented
+/// token matching neither (beyond grace) is treated as theft → revoke family.
+type RefreshTokenFamily {
+  familyId        String
+  currentHash     String
+  previousHash    String?
+  rotatedAt       DateTime
+  reuseDetectedAt DateTime?
+}
+
+// ============================================================================
+// MODELS
+// ============================================================================
+
+model User {
+  id                 String           @id @default(auto()) @map("_id") @db.ObjectId
+  kind               UserKind         @default(registered)
+  email              String? // null for guests
+  emailLower         String? // lowercased email for case-insensitive uniqueness
+  emailVerifiedAt    DateTime?
+  passwordHash       String? // argon2id; null for OAuth-only & guests
+  googleId           String? // OAuth subject
+  totpEnabled        Boolean          @default(false)
+  totpSecretEnc      String? // encrypted at rest; never leaves the server
+  recoveryCodeHashes String[]         @default([])
+  profile            UserProfile
+  usernameLower      String // lowercased profile.username for uniqueness
+  presence           PresenceSnapshot
+  guestExpiresAt     DateTime? // set when kind === guest (drives TTL, §7)
+  deletedAt          DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  sessions Session[]
+
+  @@unique([emailLower], map: "uniq_users_email_lower")
+  @@unique([usernameLower], map: "uniq_users_username_lower")
+  @@unique([googleId], map: "uniq_users_google_id")
+  @@index([guestExpiresAt])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Session {
+  id          String             @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String             @db.ObjectId
+  user        User               @relation(fields: [userId], references: [id])
+  device      DeviceMetadata
+  tokenFamily RefreshTokenFamily
+  lastSeenAt  DateTime           @default(now())
+  expiresAt   DateTime // ≤ createdAt + 30d (canon §8); drives TTL (§7)
+  revokedAt   DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([userId]) // list a user's device sessions
+  @@index([expiresAt]) // TTL sweep of expired sessions
+  @@map("sessions")
+}

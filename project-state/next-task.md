@@ -1,11 +1,9 @@
 # Project State — Next Task
 
-> The single next task to pick up once the current task unblocks.
-> **Status:** Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval.
-> **Owner agent:** Backend Engineer (lead) + Frontend Engineer
+> The single next task to pick up.
+> **Status:** Phase 1 Slice 1 done → **Slice 2 (OAuth, guest, email verify, password reset, 2FA, real-DB integration).**
+> **Owner agent:** Backend Engineer (lead)
 > Last updated: 2026-06-27
-
-> Amended 2026-06-27: Phase-0 open questions cleared; Phase 1 is unblocked the moment the R1 stakeholder approval (BLK-001) lands.
 
 ---
 
@@ -13,42 +11,30 @@
 
 | Key | Value |
 |---|---|
-| `taskId` | `P1-AUTH-KICKOFF` |
-| `title` | Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval |
+| `taskId` | `P1-AUTH-S2` |
+| `title` | Phase 1 Slice 2 — remaining auth flows + real-DB integration |
 | `phase` | `1` (Authentication) |
-| `status` | `ready` (gated on approval) |
-| `precondition` | `BLK-001` cleared (stakeholder approval, R1) — sole remaining gate; all architecture open questions resolved |
+| `status` | `ready` |
+| `precondition` | Slice 1 ([current-task.md](./current-task.md)) committed |
 | `spec` | [specs/auth.spec.md](../specs/auth.spec.md) |
-| `phasePlan` | [docs/PHASES.md](../docs/PHASES.md) |
 
-## Scope (from canon §8 + SPEC)
+## Scope (Slice 2)
 
-Implement the auth foundation per [ADR-008](../adr/ADR-008-auth-tokens.md) and
-[canon §8](../context/architecture.md#8-auth--token-model-adr-008):
-
-- `AuthModule` (NestJS): REST controllers + guards + WS auth.
-- Access JWT (RS256, 15 min) + rotating refresh token (opaque, 30 day, httpOnly cookie).
-- Refresh rotation + reuse detection (theft response: revoke session family).
-- Device `Session` management (`GET/DELETE /api/v1/auth/sessions[/:id]`).
-- Flows: email/password, Google OAuth, guest, email verification, password reset, TOTP 2FA.
-- Prisma models: `users`, `sessions` (per [canon §4](../context/architecture.md#4-data-modeling-conventions-mongodb--prisma)).
-
-## Entry Checklist (R5 — must exist before coding)
-
-- [ ] [specs/auth.spec.md](../specs/auth.spec.md) approved
-- [ ] Auth implementation tasks listed in `tasks/`
-- [ ] Auth test plan + acceptance criteria defined
-- [ ] Auth docs stub in `docs/`
-- [ ] ADR-008 confirmed current (amend only via R3 if changed)
+- **Google OAuth** (PKCE) and **guest accounts** (+ guest→registered upgrade).
+- **Email verification** and **password reset** (`EmailToken` model + flows).
+- **TOTP 2FA** enrollment + challenge + recovery codes.
+- **Session management endpoints**: `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/:id`, revoke-all.
+- **Real database integration**: wire a MongoDB (Atlas free tier or local `docker compose`) and add real integration tests (replica-set `mongodb-memory-server` or a test Atlas DB), replacing the interim in-memory Prisma double.
+- **Tooling**: real ESLint flat-config (replace placeholder `lint`), and push coverage toward the **90%** target ([docs/TESTING.md](../docs/TESTING.md)).
 
 ## First Concrete Steps
 
-1. Scaffold `apps/server` NestJS app + `AuthModule` skeleton (no business logic yet → first commit).
-2. Add `users` + `sessions` Prisma models to `packages/database/prisma/schema.prisma`.
-3. Implement token issuance/rotation service against the test plan.
+1. Decide the dev database (Atlas vs Docker) and set `DATABASE_URL`; add `prisma db push` to the dev bootstrap.
+2. Add the `EmailToken` Prisma model + the Google `AuthIdentity`/`googleId` flow.
+3. Implement guest accounts + the session list/revoke endpoints (the `SessionService` revoke paths already exist).
 
 ## Cross-links
 
-- Canon: [context/architecture.md](../context/architecture.md)
-- Phases: [docs/PHASES.md](../docs/PHASES.md)
-- Blockers gating this: [blockers.md](./blockers.md)
+- Canon §8: [context/architecture.md](../context/architecture.md)
+- Auth spec: [specs/auth.spec.md](../specs/auth.spec.md)
+- Phase plan: [docs/PHASES.md](../docs/PHASES.md)

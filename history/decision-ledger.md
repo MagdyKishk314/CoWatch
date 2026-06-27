@@ -111,6 +111,17 @@ These rows index data-model and event-catalog amendments to the [Architecture Ca
 
 > **Repomix:** regeneration is **deferred — pending first code** (PROC-3). No source exists yet, so there is nothing to pack; recorded here and in the repomix note. Repomix will be generated when the first Phase-1 source lands.
 
+### Implementation decisions (Phase 1 — Slice 1, 2026-06-27)
+
+| id | date | decision | category | status | rationale | owner |
+|---|---|---|---|---|---|---|
+| IMPL-001 | 2026-06-27 | Argon2id password hashing via `@node-rs/argon2` (prebuilt binaries) | Impl | Accepted | Avoids node-gyp/native build friction on Windows; OWASP-aligned params (19 MiB / t=2 / p=1). Implements ADR-008 + [SECURITY.md](../docs/SECURITY.md). | Backend Engineer |
+| IMPL-002 | 2026-06-27 | Opaque rotating refresh token `<sessionId>.<secret>`; only SHA-256(secret) persisted on the session's `RefreshTokenFamily` | Impl | Accepted | Locates the session without indexing the hash; reuse outside the grace window ⇒ revoke the session/family (ADR-008 reuse detection). | Backend Engineer |
+| IMPL-003 | 2026-06-27 | Monorepo resolution: dev/test consume `@cowatch/*` from source (tsconfig paths / jest mapper); production `build` consumes built `dist` | Impl | Accepted | Fast inner loop without pre-building packages, while keeping a correct, runnable production build. | DevOps Engineer |
+| IMPL-004 | 2026-06-27 | e2e auth flow tested against an in-memory Prisma double | Impl | Accepted (interim) | No local Docker/Atlas; the double exercises the full HTTP/DI/guard/rotation path. Real-Mongo integration (replica-set `mongodb-memory-server` or Atlas) is a Slice-2 task. | QA Engineer |
+
+> **Repomix update (supersedes PROC-3 hold):** the first Phase-1 source has now landed, so repomix regeneration is **now applicable**. Tracked as a Slice-2 follow-up; `scripts/repomix.ps1`/`.sh` are ready to run once the app surface stabilizes.
+
 > **PROC-2 lesson:** elevating a load-bearing "implementation detail" (the Redis backplane) to its own ADR (ADR-011) is captured as lesson [L-003](./lessons-learned.md). Only ADRs 009/010/011 are new; all B3–B6 + OQ items are history+context only.
 
 ---

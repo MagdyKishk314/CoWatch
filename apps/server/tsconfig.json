@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@cowatch/types": ["../../packages/types/src/index.ts"],
+      "@cowatch/database": ["../../packages/database/src/index.ts"]
+    },
+    "types": ["node", "jest"],
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts", "test", "node_modules", "dist", "coverage"]
+}

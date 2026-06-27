@@ -1,11 +1,11 @@
 # Project State — Current Task
 
 > What the team is actively doing right now.
-> **Status:** Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval.
-> **Owner agent:** Historian / PM
+> **Status:** Phase 1 (Authentication) — **Slice 1 (core email/password + sessions) implemented and green.**
+> **Owner agent:** Backend Engineer (lead)
 > Last updated: 2026-06-27
 
-> Amended 2026-06-27: Phase-0 open-questions punch-list cleared (ADR-009/010/011 + canon amendments); task now reflects planning-finalized state, gated only on the R1 approval.
+> Amended 2026-06-27: Stakeholder approved starting Phase 1 (R1 gate cleared, BLK-001). Slice 1 of the staged Phase-1 build is complete: monorepo toolchain + core auth vertical, build/lint/typecheck/test all green.
 
 ---
 
@@ -13,33 +13,32 @@
 
 | Key | Value |
 |---|---|
-| `taskId` | `P0-PLAN-APPROVAL` |
-| `title` | Planning finalized & open questions cleared; ready for Phase 1 (Authentication) pending approval |
-| `phase` | `0` (Architecture) |
-| `status` | `awaiting_approval` |
-| `assignee` | All planning agents (Chief Architect lead; Historian/PM owns this state) |
-| `blockedBy` | `BLK-001` (see [blockers.md](./blockers.md)) |
+| `taskId` | `P1-AUTH-S1` |
+| `title` | Phase 1 Slice 1 — core email/password auth + device sessions |
+| `phase` | `1` (Authentication) |
+| `status` | `done` (Slice 1); Slice 2 is next ([next-task.md](./next-task.md)) |
+| `assignee` | Backend Engineer |
 
-## What is being done
+## What was built (Slice 1)
 
-Phase 0 planning/design artifacts are authored, cross-linked, and self-consistency-checked
-(canon, ADRs, specs, tasks, tests, docs, project-state). The Phase-0 **open-questions
-punch-list is now cleared**: ADR-009/ADR-010 backfilled, ADR-011 (realtime backplane)
-authored, and the canon amendments (collections `room_bans` / `join_requests` /
-`activity_events` / `role_assignments` / `votes`, event `room:member:update`, field
-`playlistAuthority`, `chatLock` Member+Guest semantics) recorded per R3/R4. No implementation
-code (R1). The only remaining gate is stakeholder approval to begin Phase 1 coding.
+- **Monorepo toolchain online**: pnpm 9 + Turborepo; `build`, `lint`, `typecheck`, `test` wired across the workspace.
+- **`packages/types`** — shared auth contracts (`AccessTokenClaims`, `AuthTokens`, `PublicUser`/`SelfUser`, enums).
+- **`packages/database`** — Prisma (MongoDB) **auth subset** schema: `User`, `Session` + embedded `UserProfile`/`PresenceSnapshot`/`DeviceMetadata`/`RefreshTokenFamily`, faithful to [docs/DATABASE.md](../docs/DATABASE.md).
+- **`apps/server`** (NestJS): zod-validated config, global `PrismaModule`, `/api/healthz`, URI versioning, global `ValidationPipe`, canon §10 error-envelope filter.
+- **Auth core**: argon2id password hashing (`@node-rs/argon2`); RS256 access JWT (15 min) + **opaque rotating refresh** `<sessionId>.<secret>` (only the SHA-256 is stored) with **reuse detection** → family revoke; device `Session` lifecycle.
+- **Auth REST**: `POST /api/v1/auth/register|login|refresh|logout`, `GET /api/v1/auth/me`; httpOnly refresh cookie scoped to `/api/v1/auth`; `JwtAuthGuard` + `@CurrentUser`.
+- **Tests**: **21 passing** — unit (password, token, session/reuse-detection) + full e2e auth flow (register → login → /me → refresh → logout-revokes-refresh) via an in-memory Prisma double.
 
-## Definition of Done
+## Definition of Done (Slice 1)
 
-- [x] All planning artifacts written to their canonical paths.
-- [x] Every artifact cross-links siblings with relative markdown links.
-- [x] Type names, event names, route shapes match the [canon](../context/architecture.md) verbatim.
-- [x] Phase 1 (Authentication) has spec → tasks → tests → docs → acceptance criteria (R5).
-- [x] Phase-0 open-questions punch-list cleared (binding resolutions applied; see [open-questions.md](./open-questions.md) and the [2026-06-27 ledger remediation](../history/decision-ledger.md)).
-- [ ] Stakeholder sign-off recorded → unblocks [next-task.md](./next-task.md).
+- [x] `pnpm run build` green (3/3)
+- [x] `pnpm run typecheck` green (5/5)
+- [x] `pnpm run lint` green (placeholder; real ESLint flat-config is Slice 2)
+- [x] `pnpm run test` green (21/21)
+- [x] Reuse-detection + revocation paths covered by tests
 
-## Notes
+## Notes / known gaps (carried to Slice 2)
 
-- This is a planning task only. The moment approval lands, the active task switches to
-  the Phase 1 kickoff defined in [next-task.md](./next-task.md).
+- **No live MongoDB locally** (no Docker/Atlas here): the e2e uses an in-memory Prisma double. Wiring a real Mongo (Atlas or `docker compose`) for true integration tests is the first Slice-2 infra step.
+- **Deferred to Slice 2+**: Google OAuth, guest accounts, email verification, password reset, TOTP 2FA, `GET/DELETE /auth/sessions`, real ESLint config, and pushing coverage toward the 90% target.
+- **Dev/prod resolution**: dev/test consume `@cowatch/*` from source (path aliases / jest mapper); the production `build` consumes built `dist`.
